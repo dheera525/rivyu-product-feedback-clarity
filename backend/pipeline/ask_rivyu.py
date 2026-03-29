@@ -130,13 +130,8 @@ USER QUESTION:
         return answer.strip()
     except Exception as e:
         print(f"❌ ask_rivyu failed: {e}")
-        note = ""
-        error_str = str(e).lower()
-        if "insufficient_quota" in error_str and "openai" in error_str:
-            note = "\n\n*Note: OpenAI quota exhausted. Add billing/credits or use another key.*"
-        elif "quota" in error_str or "resource_exhausted" in error_str:
-            note = "\n\n*Note: Gemini quota exhausted. Add OPENAI_API_KEY for fallback.*"
-        return deterministic_answer() + note
+        # Keep demo UX stable: always provide a useful fallback.
+        return deterministic_answer()
 
 
 if __name__ == "__main__":
