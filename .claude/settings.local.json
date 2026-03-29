@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip3 list:*)",
+      "Bash(pip3 install:*)",
+      "Bash(curl -s -X POST http://localhost:8000/api/ingest/demo)",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s http://localhost:8000/api/status)",
+      "Bash(curl -s -X POST http://localhost:8000/api/analyze -H \"Content-Type: application/json\" -d '{}')",
+      "Bash(curl -s http://localhost:8000/api/dashboard)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f''''Stats: {d[\"\"stats\"\"]}''''\\); print\\(f''''Alerts: {len\\(d[\"\"alerts\"\"]\\)}''''\\); print\\(f''''Themes: {len\\(d[\"\"themes\"\"]\\)}''''\\); print\\(f''''Recent items: {len\\(d[\"\"recent_items\"\"]\\)}''''\\)\")",
+      "Bash(kill %1)",
+      "Bash(pkill -f \"uvicorn backend.main\")",
+      "Bash(/Users/dheer525/miniconda3/bin/pip install:*)"
+    ]
+  }
+}

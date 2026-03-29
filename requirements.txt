@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+google-play-scraper
+python-dotenv
+google-genai
+openai
+requests
+aiofiles
+python-multipart

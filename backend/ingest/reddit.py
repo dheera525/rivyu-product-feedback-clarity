@@ -1,0 +1,62 @@
+"""Reddit feedback fetcher using public JSON API (no auth needed)."""
+
+import hashlib
+import requests
+from datetime import datetime, timezone
+
+
+HEADERS = {"User-Agent": "Rivyu/1.0 (feedback-analysis-tool)"}
+
+
+def fetch_reddit_posts(subreddit, query="", count=50):
+    """Fetch posts from a subreddit, optionally filtered by search query."""
+    print(f"🔍 Fetching from r/{subreddit}" + (f" with query '{query}'" if query else "") + "...")
+
+    items = []
+    try:
+        if query:
+            url = f"https://www.reddit.com/r/{subreddit}/search.json"
+            params = {"q": query, "restrict_sr": "on", "sort": "new", "limit": min(count, 100)}
+        else:
+            url = f"https://www.reddit.com/r/{subreddit}/new.json"
+            params = {"limit": min(count, 100)}
+
+        resp = requests.get(url, headers=HEADERS, params=params, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+
+        posts = data.get("data", {}).get("children", [])
+
+        for post in posts:
+            d = post.get("data", {})
+            text = d.get("title", "")
+            body = d.get("selftext", "")
+            if body:
+                text = f"{text}. {body}"
+
+            post_id = d.get("id", hashlib.md5(text.encode()).hexdigest()[:12])
+            created = d.get("created_utc", 0)
+            date_str = datetime.fromtimestamp(created, tz=timezone.utc).isoformat() if created else ""
+
+            items.append({
+                "id": f"rd_{post_id}",
+                "source": "reddit",
+                "text": text.strip(),
+                "author": d.get("author", "anonymous"),
+                "date": date_str,
+                "rating": None,
+                "metadata": {
+                    "subreddit": f"r/{subreddit}",
+                    "upvotes": d.get("ups", 0),
+                    "num_comments": d.get("num_comments", 0),
+                    "url": d.get("url", "")
+                }
+            })
+
+    except Exception as e:
+        print(f"❌ Reddit fetch failed: {e}")
+        return []
+
+    items = [i for i in items if i["text"] and len(i["text"]) > 10]
+    print(f"✅ Fetched {len(items)} Reddit posts")
+    return items
