@@ -28,6 +28,42 @@ _store = {
 }
 
 
+RISK_PRIORITY = {
+    "critical": 4,
+    "high": 3,
+    "medium": 2,
+    "low": 1,
+    "none": 0
+}
+
+
+def _is_mixed_theme(theme):
+    label = str(theme.get("label", "") or "").strip().lower()
+    category = str(theme.get("category", "") or "").strip().lower()
+    core_bucket = str(theme.get("core_bucket", "") or "").strip().lower()
+    return (
+        category == "other"
+        or label.startswith("mixed feedback")
+        or core_bucket in {"other", "mixed feedback", "general feedback"}
+    )
+
+
+def _theme_sort_key(theme):
+    is_mixed = 1 if _is_mixed_theme(theme) else 0
+    is_pattern = 1 if theme.get("parent_theme_id") else 0
+    risk = RISK_PRIORITY.get(str(theme.get("risk_tag", "none")).lower(), 0)
+    urgency = float(theme.get("avg_urgency", 0) or 0)
+    count = int(theme.get("count", 0) or 0)
+    return (
+        is_mixed,          # mixed/general themes last
+        is_pattern,        # primary themes before phrase subthemes
+        -risk,             # higher risk first
+        -urgency,          # higher urgency first
+        -count,            # then mention count
+        str(theme.get("label", "") or "").lower()
+    )
+
+
 def _ensure_data_dir():
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -153,7 +189,12 @@ def get_dashboard_data(time_filter="all"):
         themes_summary.append({
             "theme_id": theme_id,
             "label": t.get("label", ""),
+            "core_bucket": t.get("core_bucket", "Other"),
             "category": t.get("category", "other"),
+            "risk_tag": t.get("risk_tag", "none"),
+            "parent_theme_id": t.get("parent_theme_id"),
+            "dynamic_bucket": t.get("dynamic_bucket"),
+            "phrase": t.get("phrase", ""),
             "count": count,
             "avg_sentiment": t.get("avg_sentiment", 0),
             "avg_urgency": t.get("avg_urgency", 0),
@@ -164,8 +205,8 @@ def get_dashboard_data(time_filter="all"):
             "window_counts": windows
         })
 
-    # Sort by count descending
-    themes_summary.sort(key=lambda x: x["count"], reverse=True)
+    # Prioritize actionable themes first; keep mixed/general feedback at the end.
+    themes_summary.sort(key=_theme_sort_key)
 
     source_breakdown = {}
     for item in filtered:

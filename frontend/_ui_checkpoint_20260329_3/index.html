@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rivyu — Product Feedback Clarity</title>
+    <link rel="stylesheet" href="/static/style.css?v=20260329-theme10">
+</head>
+<body>
+    <div id="app">
+        <!-- NAV -->
+        <nav class="navbar">
+            <div class="nav-brand">
+                <span class="logo">R</span>
+                <span class="brand-name">Rivyu</span>
+                <span class="brand-tag">Product feedback signal console</span>
+            </div>
+            <div class="nav-links">
+                <button class="nav-btn active" data-page="sources">Sources</button>
+                <button class="nav-btn" data-page="dashboard">Dashboard</button>
+                <button class="nav-btn" data-page="ask">Ask Rivyu</button>
+            </div>
+        </nav>
+
+        <!-- PAGE: SOURCES -->
+        <div id="page-sources" class="page active">
+            <div class="hero-panel">
+                <div class="page-header page-header-hero">
+                    <div class="header-title-group">
+                        <h1>Load Reviews</h1>
+                        <p>Connect your sources, then run one clean analysis for this session.</p>
+                    </div>
+                    <div class="page-header-note">Session-scoped output only.</div>
+                </div>
+                <div class="hero-meta-row">
+                    <div class="trust-strip">
+                        <span class="trust-pill">Session-isolated</span>
+                        <span class="trust-pill">Source-linked evidence</span>
+                        <span class="trust-pill">Decision-ready summary</span>
+                    </div>
+                    <div class="hero-status">
+                        <span class="hero-status-dot"></span>
+                        <span id="hero-session-status">Awaiting source connections</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="source-grid">
+                <!-- Google Play -->
+                <div class="source-card">
+                    <div class="source-icon">📱</div>
+                    <h3>Google Play Reviews</h3>
+                    <p>Pull recent reviews by app ID</p>
+                    <div class="source-form">
+                        <input type="text" id="gp-app-id" placeholder="e.g. com.whatsapp" />
+                        <input type="number" id="gp-count" value="80" min="10" max="300" />
+                        <button onclick="ingestPlayStore()" class="btn btn-primary">Fetch Reviews</button>
+                    </div>
+                    <div id="gp-status" class="source-status"></div>
+                </div>
+
+                <!-- Reddit -->
+                <div class="source-card">
+                    <div class="source-icon">🔍</div>
+                    <h3>Reddit Posts</h3>
+                    <p>Pull recent posts from a subreddit</p>
+                    <div class="source-form">
+                        <input type="text" id="reddit-sub" placeholder="e.g. whatsapp" />
+                        <input type="text" id="reddit-query" placeholder="Search query (optional)" />
+                        <input type="number" id="reddit-count" value="80" min="10" max="300" />
+                        <button onclick="ingestReddit()" class="btn btn-primary">Fetch Posts</button>
+                    </div>
+                    <div id="reddit-status" class="source-status"></div>
+                </div>
+
+                <!-- CSV -->
+                <div class="source-card">
+                    <div class="source-icon">📄</div>
+                    <h3>CSV Reviews</h3>
+                    <p>Upload a CSV containing a `text` column</p>
+                    <div class="source-form">
+                        <input type="file" id="csv-file" accept=".csv" />
+                        <button onclick="ingestCSV()" class="btn btn-primary">Upload CSV</button>
+                    </div>
+                    <div id="csv-status" class="source-status"></div>
+                </div>
+
+                <!-- Demo -->
+                <div class="source-card source-card-demo">
+                    <div class="source-icon">🎯</div>
+                    <h3>Demo Dataset</h3>
+                    <p>Load sample feedback for a quick walkthrough</p>
+                    <div class="source-form">
+                        <button onclick="loadDemo()" class="btn btn-accent">Load Demo Data</button>
+                    </div>
+                    <div id="demo-status" class="source-status"></div>
+                </div>
+            </div>
+
+            <!-- Connected sources summary -->
+            <div id="sources-summary" class="sources-summary hidden">
+                <div class="sources-summary-head">
+                    <h3>Connected Inputs</h3>
+                    <button onclick="resetSession()" class="btn btn-small">Clear Sources</button>
+                </div>
+                <div id="system-state-text" class="system-state-text">Awaiting source inputs.</div>
+                <div id="sources-list"></div>
+                <div class="summary-total">Total items: <span id="total-count">0</span></div>
+            </div>
+
+            <!-- Run Analysis -->
+            <div class="analyze-section">
+                <button id="analyze-btn" onclick="runAnalysis()" class="btn btn-large btn-accent" disabled>
+                    Analyze Current Session
+                </button>
+                <p class="session-note">Data is stored locally for this demo and replaced on each new source load.</p>
+            </div>
+        </div>
+
+        <!-- PAGE: LOADING -->
+        <div id="page-loading" class="page">
+            <div class="loading-container">
+                <div class="loading-spinner"></div>
+                <h2 id="loading-title">Analyzing current session...</h2>
+                <div class="loading-progress">
+                    <div id="loading-progress-fill" class="loading-progress-fill"></div>
+                </div>
+                <div id="loading-stage-caption" class="loading-stage-caption">Preparing analysis context...</div>
+                <div class="loading-steps">
+                    <div class="step" id="step-ingest"><span class="step-icon">⏳</span> Normalizing source data</div>
+                    <div class="step" id="step-classify"><span class="step-icon">⏳</span> Classifying sentiment and urgency</div>
+                    <div class="step" id="step-themes"><span class="step-icon">⏳</span> Grouping recurring patterns</div>
+                    <div class="step" id="step-trends"><span class="step-icon">⏳</span> Computing trend windows</div>
+                    <div class="step" id="step-alerts"><span class="step-icon">⏳</span> Compiling priority alerts</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- PAGE: DASHBOARD -->
+        <div id="page-dashboard" class="page">
+            <div class="page-header page-header-hero">
+                <div class="header-title-group">
+                    <h1>Dashboard</h1>
+                    <p>Session-level insights with source traceability and evidence.</p>
+                </div>
+                <div class="dash-actions">
+                    <div class="time-filters">
+                        <button class="btn btn-small time-btn active" data-filter="all" onclick="setTimeFilter('all')">All Time</button>
+                        <button class="btn btn-small time-btn" data-filter="7d" onclick="setTimeFilter('7d')">Last 7 Days</button>
+                        <button class="btn btn-small time-btn" data-filter="24h" onclick="setTimeFilter('24h')">Last 24h</button>
+                    </div>
+                    <button onclick="refreshDashboard()" class="btn btn-small">Refresh</button>
+                    <button onclick="resetSession()" class="btn btn-small">Clear Sources</button>
+                    <button onclick="downloadComplaintsCSV()" class="btn btn-small">Export Complaints CSV</button>
+                    <button onclick="showPage('ask')" class="btn btn-small btn-accent">Ask Rivyu</button>
+                </div>
+            </div>
+
+            <!-- Stats bar -->
+            <div id="stats-bar" class="stats-bar"></div>
+
+            <!-- Alerts -->
+            <div id="alerts-section" class="section">
+                <div class="section-head">
+                    <h2>Priority Alerts</h2>
+                    <p class="section-note">Highest-risk signals to review first.</p>
+                </div>
+                <div id="alerts-grid" class="alerts-grid"></div>
+            </div>
+
+            <!-- Themes -->
+            <div id="themes-section" class="section">
+                <div class="section-head">
+                    <h2>Main Themes</h2>
+                    <div class="section-head-right">
+                        <div class="theme-scope-filters">
+                            <button class="btn btn-small theme-scope-btn active" data-theme-scope="all" onclick="setThemeScope('all')">All</button>
+                            <button class="btn btn-small theme-scope-btn" data-theme-scope="primary" onclick="setThemeScope('primary')">Primary</button>
+                            <button class="btn btn-small theme-scope-btn" data-theme-scope="pattern" onclick="setThemeScope('pattern')">Patterns</button>
+                        </div>
+                        <p class="section-note">Recurring topics from this session.</p>
+                    </div>
+                </div>
+                <div id="themes-grid" class="themes-grid"></div>
+            </div>
+
+            <!-- Recent evidence -->
+            <div id="evidence-section" class="section">
+                <div class="section-head">
+                    <h2>Real Review Evidence</h2>
+                    <p class="section-note">Recent comments with source context.</p>
+                </div>
+                <div id="evidence-list" class="evidence-list"></div>
+            </div>
+        </div>
+
+        <!-- PAGE: THEME DETAIL -->
+        <div id="page-theme" class="page">
+            <button onclick="showPage('dashboard')" class="btn btn-small back-btn">&larr; Back to Dashboard</button>
+            <div id="theme-detail-content"></div>
+        </div>
+
+        <!-- PAGE: ASK RIVYU -->
+        <div id="page-ask" class="page">
+            <div class="page-header page-header-hero">
+                <div class="header-title-group">
+                    <h1>Ask Rivyu</h1>
+                    <p>Ask questions grounded in the current analyzed dataset.</p>
+                </div>
+                <div class="page-header-note">Answers are scoped to this session.</div>
+            </div>
+            <div class="chat-container">
+                <div id="chat-messages" class="chat-messages">
+                    <div class="chat-msg bot">
+                        <strong>Rivyu</strong>
+                        <p>Your session is analyzed. Ask about priorities, risks, or emerging patterns.</p>
+                    </div>
+                </div>
+                <div class="chat-input-row">
+                    <input type="text" id="ask-input" placeholder="Ask a question about your feedback..." onkeydown="if(event.key==='Enter')askQuestion()" />
+                    <button onclick="askQuestion()" class="btn btn-accent">Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js?v=20260329-theme10"></script>
+</body>
+</html>

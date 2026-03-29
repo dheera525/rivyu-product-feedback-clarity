@@ -1,34 +1,61 @@
 # Rivyu Deployment
 
-## Option A: Deploy on Render (recommended quick path)
+## Recommended: Render (single service)
 
-1. Push this repo to GitHub.
-2. In Render, create a new **Web Service** from the repo.
-3. Render will detect `render.yaml` and build with Docker.
-4. Set env vars in Render dashboard:
-   - `GEMINI_API_KEY` (optional if using OpenAI only)
-   - `OPENAI_API_KEY` (optional if using Gemini only)
+### 1) Preflight (local)
+
+```bash
+./run.sh
+```
+
+Check:
+- `http://localhost:8000/api/health` returns `{"status":"ok"}`
+- UI loads at `http://localhost:8000`
+
+### 2) Push to GitHub
+
+```bash
+git add .
+git commit -m "Deploy-ready Rivyu"
+git push origin main
+```
+
+### 3) Create Render service
+
+1. Render dashboard -> **New** -> **Web Service**.
+2. Select your GitHub repo.
+3. Render auto-detects `render.yaml` and uses Docker.
+4. Confirm health check path: `/api/health`.
 5. Deploy.
-6. Verify:
-   - `GET /api/health` should return `{"status":"ok"}`
-   - Open site root `/`
 
-## Option B: Docker locally / any VM
+### 4) Set environment variables in Render
+
+Set at least one working provider key:
+- `OPENAI_API_KEY` (recommended)
+- `GEMINI_API_KEY` (optional fallback/provider choice)
+
+You can set both for safer failover.
+
+### 5) Verify production
+
+After deploy:
+- `https://<your-render-url>/api/health`
+- Open `https://<your-render-url>/`
+- Run a quick ingest -> analyze -> dashboard -> ask flow
+
+## Docker (local or any VM)
 
 ```bash
 docker build -t rivyu .
 docker run --rm -p 8000:8000 \
-  -e GEMINI_API_KEY=your_key \
   -e OPENAI_API_KEY=your_key \
+  -e GEMINI_API_KEY=your_key \
   rivyu
 ```
 
-Then open: `http://localhost:8000`
-
 ## Notes
 
-- App serves both frontend and API from one process.
-- Store is file-based (`data/store.json`).
-- If your platform filesystem is ephemeral, data resets on container restart.
-- Ask Rivyu may return deterministic fallback text if LLM provider quotas are exhausted.
-
+- Frontend and API are served by one FastAPI process.
+- Store is JSON-backed (`data/store.json`).
+- On ephemeral filesystems, stored runs reset when container restarts.
+- If LLM keys are missing/exhausted, parts of the pipeline gracefully fall back to heuristic behavior.

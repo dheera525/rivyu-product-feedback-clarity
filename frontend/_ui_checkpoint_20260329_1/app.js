@@ -1,5 +1,5 @@
 // ============================
-// Rivyu — Frontend Logic v2
+// Rivyu — Frontend Logic
 // ============================
 
 const API = '';  // same origin
@@ -26,14 +26,6 @@ function showPage(name) {
 
     const navBtn = document.querySelector(`.nav-btn[data-page="${name}"]`);
     if (navBtn) navBtn.classList.add('active');
-
-    // Show/hide nav based on page
-    const nav = document.getElementById('main-nav');
-    if (name === 'landing') {
-        nav.classList.add('nav-transparent');
-    } else {
-        nav.classList.remove('nav-transparent');
-    }
 
     if (name === 'dashboard') refreshDashboard();
     if (name === 'ask') {
@@ -64,7 +56,7 @@ async function ingestPlayStore() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Failed');
-        status.textContent = `✓ Fetched ${data.count} reviews`; status.className = 'source-status success';
+        status.textContent = `Fetched ${data.count} reviews`; status.className = 'source-status success';
         onSourceAdded('google_play', appId, data.count);
     } catch (e) {
         status.textContent = `Error: ${e.message}`; status.className = 'source-status error';
@@ -90,7 +82,7 @@ async function ingestReddit() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Failed');
-        status.textContent = `✓ Fetched ${data.count} posts`; status.className = 'source-status success';
+        status.textContent = `Fetched ${data.count} posts`; status.className = 'source-status success';
         onSourceAdded('reddit', `r/${sub}`, data.count);
     } catch (e) {
         status.textContent = `Error: ${e.message}`; status.className = 'source-status error';
@@ -111,7 +103,7 @@ async function ingestCSV() {
         const res = await fetch(`${API}/api/ingest/csv`, { method: 'POST', body: form });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Failed');
-        status.textContent = `✓ Parsed ${data.count} items`; status.className = 'source-status success';
+        status.textContent = `Parsed ${data.count} items`; status.className = 'source-status success';
         onSourceAdded('csv', fileInput.files[0].name, data.count);
     } catch (e) {
         status.textContent = `Error: ${e.message}`; status.className = 'source-status error';
@@ -126,20 +118,15 @@ async function loadDemo() {
         const res = await fetch(`${API}/api/ingest/demo`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Failed');
-        status.textContent = `✓ Loaded ${data.count} demo items`; status.className = 'source-status success';
+        status.textContent = `Loaded ${data.count} demo items`; status.className = 'source-status success';
         onSourceAdded('demo', 'demo_dataset', data.count);
     } catch (e) {
         status.textContent = `Error: ${e.message}`; status.className = 'source-status error';
     }
 }
 
-async function quickDemo() {
-    showPage('sources');
-    await loadDemo();
-    runAnalysis();
-}
-
 function onSourceAdded(type, id, count) {
+    // Demo load is a full reset dataset; other sources stack together.
     if (type === 'demo') {
         totalIngested = count;
         connectedSources = [{ type, id, count }];
@@ -161,9 +148,6 @@ function updateSourcesSummary() {
     const list = document.getElementById('sources-list');
     const total = document.getElementById('total-count');
     const analyzeBtn = document.getElementById('analyze-btn');
-    const systemState = document.getElementById('system-state-text');
-    const heroState = document.getElementById('hero-session-status');
-    const heroStateWrap = document.querySelector('.hero-status');
 
     summary.classList.remove('hidden');
     list.innerHTML = connectedSources.map(s =>
@@ -171,48 +155,33 @@ function updateSourcesSummary() {
     ).join('');
     total.textContent = totalIngested;
     analyzeBtn.disabled = totalIngested === 0;
-    summary.classList.toggle('armed', totalIngested > 0);
-    if (heroStateWrap) heroStateWrap.classList.toggle('ready', totalIngested > 0);
-    if (systemState) {
-        const sourceCount = connectedSources.length;
-        systemState.textContent = `${sourceCount} input${sourceCount === 1 ? '' : 's'} connected · ${totalIngested} records ready for analysis.`;
-    }
-    if (heroState) {
-        heroState.textContent = `${connectedSources.length} source${connectedSources.length === 1 ? '' : 's'} connected · analysis ready`;
-    }
 }
 
 function clearDashboardView() {
-    const hero = document.getElementById('dashboard-hero');
-    if (hero) {
-        hero.innerHTML = '<div class="no-data">Run analysis to generate a fresh intelligence brief.</div>';
-    }
-    document.getElementById('stats-bar').innerHTML = '<div class="no-data">A new source is loaded. Run analysis to view updated results.</div>';
+    document.getElementById('stats-bar').innerHTML = '<div class="no-data">New source loaded. Run analysis to see fresh results.</div>';
     document.getElementById('alerts-grid').innerHTML = '<div class="no-data">Run analysis to generate priority alerts.</div>';
-    document.getElementById('themes-grid').innerHTML = '<div class="no-data">Run analysis to map core themes.</div>';
-    document.getElementById('evidence-list').innerHTML = '<div class="no-data">Run analysis to surface source-linked evidence.</div>';
+    document.getElementById('themes-grid').innerHTML = '<div class="no-data">Run analysis to generate themes.</div>';
+    document.getElementById('evidence-list').innerHTML = '<div class="no-data">Run analysis to preview review evidence.</div>';
 }
 
 async function resetSession() {
     try {
         await fetch(`${API}/api/reset`, { method: 'POST' });
-    } catch (e) { /* continue */ }
+    } catch (e) {
+        // Continue clearing local state even if backend reset fails.
+    }
 
     totalIngested = 0;
     connectedSources = [];
     document.getElementById('sources-summary').classList.add('hidden');
-    document.getElementById('sources-summary').classList.remove('armed');
     document.getElementById('total-count').textContent = '0';
     document.getElementById('analyze-btn').disabled = true;
-    const systemState = document.getElementById('system-state-text');
-    if (systemState) systemState.textContent = 'Awaiting source inputs.';
-    const heroState = document.getElementById('hero-session-status');
-    if (heroState) heroState.textContent = 'Awaiting source connections';
-    const heroStateWrap = document.querySelector('.hero-status');
-    if (heroStateWrap) heroStateWrap.classList.remove('ready');
     ['gp-status', 'reddit-status', 'csv-status', 'demo-status'].forEach(id => {
         const el = document.getElementById(id);
-        if (el) { el.textContent = ''; el.className = 'source-status'; }
+        if (el) {
+            el.textContent = '';
+            el.className = 'source-status';
+        }
     });
     clearDashboardView();
     showPage('sources');
@@ -225,18 +194,18 @@ async function runAnalysis() {
 
     const steps = ['ingest', 'classify', 'themes', 'trends', 'alerts'];
     const stageText = {
-        ingest: 'Stage 1/5: Preparing data',
-        classify: 'Stage 2/5: AI bucket classification',
+        ingest: 'Stage 1/5: Preparing feedback',
+        classify: 'Stage 2/5: Classifying comments',
         themes: 'Stage 3/5: Grouping themes',
-        trends: 'Stage 4/5: Computing trends',
-        alerts: 'Stage 5/5: Generating risk alerts'
+        trends: 'Stage 4/5: Checking trends',
+        alerts: 'Stage 5/5: Building alerts'
     };
     const stageCaption = {
-        ingest: 'Normalizing source data for a consistent run.',
-        classify: 'Assigning core buckets, risk tags, and urgency scores.',
-        themes: 'Grouping repeated feedback into intelligent theme clusters.',
-        trends: 'Calculating movement across 24h and 7d windows.',
-        alerts: 'Compiling high-priority risk alerts for review.'
+        ingest: 'Collecting and sanitizing review data from connected sources.',
+        classify: 'Classifying sentiment, urgency, and categories.',
+        themes: 'Combining repeated signals into clear issue themes.',
+        trends: 'Computing 24h and 7d movement for each theme.',
+        alerts: 'Raising actionable high-priority alerts.'
     };
     let currentStep = 0;
 
@@ -260,6 +229,7 @@ async function runAnalysis() {
         }
     }
 
+    // Simulate step progress
     advanceStep();
     const stepInterval = setInterval(() => {
         if (currentStep < steps.length) advanceStep();
@@ -277,6 +247,7 @@ async function runAnalysis() {
 
         clearInterval(stepInterval);
 
+        // Complete all remaining steps
         for (let i = currentStep - 1; i < steps.length; i++) {
             const el = document.getElementById(`step-${steps[i]}`);
             el.classList.remove('active');
@@ -288,19 +259,20 @@ async function runAnalysis() {
         const caption = document.getElementById('loading-stage-caption');
         const fill = document.getElementById('loading-progress-fill');
         if (fill) fill.style.width = '100%';
-        if (caption) caption.textContent = 'Preparing dashboard view...';
+        if (caption) caption.textContent = 'Finalizing dashboard output...';
 
         setTimeout(() => {
+            // Reset loading state for next run
             steps.forEach(s => {
                 const el = document.getElementById(`step-${s}`);
                 el.classList.remove('active', 'done');
                 el.querySelector('.step-icon').textContent = '⏳';
             });
-            document.getElementById('loading-title').textContent = 'Analyzing current session...';
+            document.getElementById('loading-title').textContent = 'Analyzing feedback...';
             const resetCaption = document.getElementById('loading-stage-caption');
             const resetFill = document.getElementById('loading-progress-fill');
             if (resetFill) resetFill.style.width = '0%';
-            if (resetCaption) resetCaption.textContent = 'Preparing analysis context...';
+            if (resetCaption) resetCaption.textContent = 'Preparing run...';
             showPage('dashboard');
         }, 1200);
     } catch (e) {
@@ -333,14 +305,12 @@ function setThemeScope(scope) {
 
 async function refreshDashboard() {
     try {
-        document.getElementById('stats-bar').innerHTML = '<div class="no-data">Loading session dashboard...</div>';
+        document.getElementById('stats-bar').innerHTML = '<div class="no-data">Loading current run dashboard...</div>';
         const res = await fetch(`${API}/api/dashboard?time_filter=${currentTimeFilter}`);
         if (!res.ok) {
             const err = await res.json();
             if (res.status === 404) {
-                const hero = document.getElementById('dashboard-hero');
-                if (hero) hero.innerHTML = '<div class="no-data">No run intelligence available yet.</div>';
-                document.getElementById('stats-bar').innerHTML = '<div class="no-data">No analysis results yet. Go to Sources and run analysis.</div>';
+                document.getElementById('stats-bar').innerHTML = '<div class="no-data">No analysis results yet. Go to Sources and run analysis first.</div>';
                 return;
             }
             throw new Error(err.detail);
@@ -352,24 +322,6 @@ async function refreshDashboard() {
     }
 }
 
-// --- Risk tag display helpers ---
-
-const RISK_COLORS = {
-    revenue_risk: { bg: 'rgba(255,107,122,0.14)', color: '#ff9aa5', label: 'Revenue Risk' },
-    churn_risk: { bg: 'rgba(255,179,92,0.14)', color: '#ffd19a', label: 'Churn Risk' },
-    stability_risk: { bg: 'rgba(255,107,122,0.14)', color: '#ff9aa5', label: 'Stability Risk' },
-    trust_risk: { bg: 'rgba(255,179,92,0.14)', color: '#ffd4a0', label: 'Trust Risk' },
-    ux_risk: { bg: 'rgba(169,176,189,0.16)', color: '#c8ced9', label: 'UX Risk' },
-    support_risk: { bg: 'rgba(216,195,133,0.14)', color: '#ffe2a0', label: 'Support Risk' },
-    retention_risk: { bg: 'rgba(143,184,168,0.14)', color: '#a9c5bb', label: 'Retention Risk' },
-    none: { bg: 'rgba(143,171,184,0.1)', color: '#bbc1cc', label: 'No Risk' }
-};
-
-function riskChip(tag) {
-    const r = RISK_COLORS[tag] || RISK_COLORS.none;
-    return `<span class="risk-chip" style="background:${r.bg};color:${r.color}">${r.label}</span>`;
-}
-
 function renderDashboard(data) {
     const stats = data.stats || {};
     const windows = stats.window_counts || {};
@@ -379,35 +331,6 @@ function renderDashboard(data) {
     const sourceBreakdown = data.source_breakdown || {};
     const sourceCount = Object.keys(sourceBreakdown).length;
     const priorityAlerts = (data.alerts || []).length;
-    const topTheme = (data.themes || [])[0];
-    const topAlert = (data.alerts || [])[0];
-    const dashboardHero = document.getElementById('dashboard-hero');
-
-    if (dashboardHero) {
-        const runDate = runMeta.analyzed_at ? escHtml(runMeta.analyzed_at.replace('T', ' ').slice(0, 19)) : 'n/a';
-        dashboardHero.innerHTML = `
-            <div class="dashboard-hero-main">
-                <div class="hero-kicker">Session Intelligence Brief</div>
-                <h3>${topTheme ? escHtml(topTheme.label) : 'No dominant signal yet'}</h3>
-                <p>${topAlert ? escHtml(topAlert.title) : 'No high-risk alert is active in this run.'}</p>
-                ${topAlert ? `<div class="hero-risk-row">${riskChip(topAlert.risk_tag || 'none')}<span class="meta-chip">risk ${topAlert.risk_score || 0}</span></div>` : ''}
-            </div>
-            <div class="dashboard-hero-meta">
-                <div class="hero-meta-item">
-                    <span class="hero-meta-label">Run ID</span>
-                    <span class="hero-meta-value">${escHtml(runMeta.analysis_id || 'n/a')}</span>
-                </div>
-                <div class="hero-meta-item">
-                    <span class="hero-meta-label">Analyzed At</span>
-                    <span class="hero-meta-value">${runDate}</span>
-                </div>
-                <div class="hero-meta-item">
-                    <span class="hero-meta-label">Active Sources</span>
-                    <span class="hero-meta-value">${sourceCount}</span>
-                </div>
-            </div>
-        `;
-    }
 
     document.getElementById('stats-bar').innerHTML = `
         <div class="stat-card tone-blue">
@@ -433,12 +356,17 @@ function renderDashboard(data) {
         <div class="stat-card tone-rose">
             <div class="stat-kicker">Priority</div>
             <div class="stat-value">${priorityAlerts}</div>
-            <div class="stat-label">Active Alerts</div>
+            <div class="stat-label">High/Critical Alerts</div>
         </div>
         <div class="stat-card tone-teal">
             <div class="stat-kicker">Scope</div>
             <div class="stat-value">${sourceCount}</div>
             <div class="stat-label">Active Sources</div>
+        </div>
+        <div class="stat-card stat-card-wide">
+            <div class="stat-kicker">Run Context</div>
+            <div class="stat-subvalue">${escHtml(sourceLabel)}</div>
+            <div class="stat-note">Run: ${escHtml(runMeta.analysis_id || 'n/a')} ${runMeta.analyzed_at ? `| ${escHtml(runMeta.analyzed_at)}` : ''}</div>
         </div>
     `;
 
@@ -450,19 +378,17 @@ function renderDashboard(data) {
         document.getElementById('alerts-grid').innerHTML = alerts.map(a => `
             <div class="alert-card ${a.severity} ${a.theme_id ? 'clickable' : ''}" ${a.theme_id ? `onclick="openTheme('${escAttr(a.theme_id)}')"` : ''}>
                 <div class="alert-head">
-                    <div class="alert-head-left">
-                        <div class="alert-severity">${a.severity}</div>
-                        ${riskChip(a.risk_tag || 'none')}
-                    </div>
+                    <div class="alert-severity">${a.severity}</div>
                     <div class="alert-meta">
                         <span class="meta-chip">risk ${a.risk_score || 0}</span>
-                        <span class="meta-chip">${a.evidence_count || 0} items</span>
+                        <span class="meta-chip">${(a.window_counts || {}).mentions_7d || 0} in 7d</span>
                     </div>
                 </div>
                 <div class="alert-title">${escHtml(a.title)}</div>
                 <div class="alert-desc">${escHtml(a.description)}</div>
-                <div class="alert-action"><strong>Action:</strong> ${escHtml(a.suggested_action)}</div>
-                ${a.theme_id ? '<div class="alert-open-hint">Click to view full evidence →</div>' : ''}
+                <div class="alert-action">${escHtml(a.suggested_action)}</div>
+                <div class="alert-foot">24h: ${(a.window_counts || {}).mentions_24h || 0} | 7d: ${(a.window_counts || {}).mentions_7d || 0} | total: ${(a.window_counts || {}).mentions_total || 0} | urgent: ${a.high_urgency_count || 0}</div>
+                ${a.theme_id ? '<div class="alert-open-hint">Click to view full evidence</div>' : ''}
             </div>
         `).join('');
     }
@@ -492,8 +418,8 @@ function renderDashboard(data) {
                         <span class="meta-chip">${t.count} mentions</span>
                     </div>
                     <div class="theme-meta">
-                        ${riskChip(t.risk_tag || 'none')}
-                        ${isPatternTheme ? '<span class="meta-chip">sub-pattern</span>' : '<span class="meta-chip">core bucket</span>'}
+                        <span class="meta-chip">${escHtml(t.category)}</span>
+                        ${isPatternTheme ? '<span class="meta-chip">pattern</span>' : '<span class="meta-chip">primary</span>'}
                         <span class="trend-badge ${t.trend}">${t.trend} ${t.trend_pct > 0 ? '+' : ''}${t.trend_pct}%</span>
                     </div>
                     <div class="theme-share-bar"><div class="theme-share-fill" style="width:${share}%"></div></div>
@@ -503,9 +429,9 @@ function renderDashboard(data) {
                         <span>Total: ${win.mentions_total || t.count}</span>
                     </div>
                     <div class="theme-tags">
-                        ${topTags.length ? topTags.map(tag => `<span class="meta-chip">#${escHtml(tag)}</span>`).join('') : ''}
+                        ${topTags.length ? topTags.map(tag => `<span class="meta-chip">#${escHtml(tag)}</span>`).join('') : '<span class="meta-chip">No clear keywords yet</span>'}
                     </div>
-                    <div class="theme-insight-row">Urgency ${t.avg_urgency}/5 · Sentiment ${t.avg_sentiment}</div>
+                    <div class="theme-insight-row">Urgency ${t.avg_urgency}/5 | Sentiment ${t.avg_sentiment}</div>
                 </div>
             `;
         }).join('');
@@ -516,28 +442,20 @@ function renderDashboard(data) {
     if (items.length === 0) {
         document.getElementById('evidence-list').innerHTML = '<div class="no-data">No feedback items</div>';
     } else {
-        document.getElementById('evidence-list').innerHTML = items.slice(0, 15).map(item => {
-            const urgencyClass = item.urgency >= 4 ? 'urgency-high' : item.urgency <= 2 ? 'urgency-low' : '';
-            const sentimentClass = item.sentiment < -0.3 ? 'sentiment-neg' : item.sentiment > 0.3 ? 'sentiment-pos' : '';
-            return `
-            <div class="evidence-item ${urgencyClass} ${sentimentClass}">
-                <div class="evidence-text">
-                    <div class="evidence-summary">${escHtml(item.summary || '')}</div>
-                    <div class="evidence-full">${escHtml(item.text || '')}</div>
-                </div>
+        document.getElementById('evidence-list').innerHTML = items.slice(0, 15).map(item => `
+            <div class="evidence-item">
+                <div class="evidence-text">${escHtml(item.text || item.summary || '')}</div>
                 <div class="evidence-badges">
-                    ${item.core_bucket ? `<span class="meta-chip bucket-chip">${escHtml(item.core_bucket)}</span>` : ''}
-                    ${riskChip(item.risk_tag || 'none')}
                     <span class="meta-chip">${item.source || 'unknown'}</span>
+                    ${item.metadata && item.metadata.app_id ? `<span class="meta-chip">${escHtml(item.metadata.app_id)}</span>` : ''}
+                    ${item.author ? `<span class="meta-chip">${escHtml(item.author)}</span>` : ''}
+                    ${item.date ? `<span class="meta-chip">${escHtml(item.date.slice(0, 10))}</span>` : ''}
                     ${item.rating ? `<span class="meta-chip">★${item.rating}</span>` : ''}
-                    <span class="meta-chip urgency-chip-${item.urgency || 3}">urgency ${item.urgency || '?'}</span>
+                    <span class="meta-chip">urgency ${item.urgency || '?'}</span>
                 </div>
             </div>
-        `;
-        }).join('');
+        `).join('');
     }
-
-    triggerDashboardMotion();
 }
 
 // --- Theme Detail ---
@@ -568,11 +486,10 @@ function renderThemeDetail(theme) {
         <div class="detail-header">
             <h1>${escHtml(theme.label || theme.theme_id)}</h1>
             <div class="theme-meta">
-                ${riskChip(theme.risk_tag || 'none')}
-                <span class="meta-chip">${escHtml(theme.core_bucket || theme.category || '')}</span>
+                <span class="meta-chip">${theme.category}</span>
                 <span class="trend-badge ${theme.trend}">${theme.trend} ${theme.trend_pct > 0 ? '+' : ''}${theme.trend_pct}%</span>
             </div>
-            <p class="detail-sub">All evidence behind this theme from the current run.</p>
+            <p class="detail-sub">This page shows all evidence behind this theme from the current run.</p>
         </div>
 
         <div class="detail-stats">
@@ -585,6 +502,7 @@ function renderThemeDetail(theme) {
         <div class="section">
             <div class="section-head">
                 <h2>Source Distribution</h2>
+                <p class="section-note">Where this theme appears most.</p>
             </div>
             <div class="detail-distribution">
                 ${Object.entries(sources).map(([k,v]) => `<span class="source-tag">${k}: ${v}</span>`).join('')}
@@ -595,6 +513,7 @@ function renderThemeDetail(theme) {
         <div class="section">
             <div class="section-head">
                 <h2>Timeline</h2>
+                <p class="section-note">Simple historical movement for this theme.</p>
             </div>
             <div class="timeline-bars">
                 ${Object.entries(theme.time_buckets).map(([week, count]) => {
@@ -611,65 +530,27 @@ function renderThemeDetail(theme) {
         <div class="detail-items section">
             <div class="section-head">
                 <h2>Feedback Items (${items.length})</h2>
+                <p class="section-note">Direct evidence driving this theme score.</p>
             </div>
             <div class="evidence-list">
-                ${items.map(item => {
-                    const urgencyClass = item.urgency >= 4 ? 'urgency-high' : item.urgency <= 2 ? 'urgency-low' : '';
-                    return `
-                    <div class="evidence-item ${urgencyClass}">
+                ${items.map(item => `
+                    <div class="evidence-item">
                         <div class="evidence-text">
                             <div>${escHtml(item.text || item.summary || '')}</div>
-                            <div class="evidence-mini-meta">${item.date || ''} · ${item.source || ''} ${item.rating ? '· ' + '★'.repeat(item.rating) : ''}</div>
+                            <div class="evidence-mini-meta">${item.date || ''} &middot; ${item.source || ''} ${item.rating ? '&middot; ' + '★'.repeat(item.rating) : ''}</div>
                         </div>
                         <div class="evidence-badges">
-                            <span class="meta-chip urgency-chip-${item.urgency}">urgency ${item.urgency}</span>
+                            <span class="meta-chip">urgency ${item.urgency}</span>
                             <span class="meta-chip">${item.sentiment > 0 ? '+' : ''}${item.sentiment}</span>
                         </div>
                     </div>
-                `;}).join('')}
+                `).join('')}
             </div>
         </div>
     `;
 }
 
 // --- Ask Rivyu ---
-
-function formatMarkdown(text) {
-    if (!text) return '<p>No response.</p>';
-
-    let html = escHtml(text);
-
-    // Headers
-    html = html.replace(/^### (.+)$/gm, '<h4 class="ask-h4">$1</h4>');
-    html = html.replace(/^## (.+)$/gm, '<h3 class="ask-h3">$1</h3>');
-
-    // Bold
-    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-
-    // Italic
-    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-
-    // Bullet lists
-    html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
-    html = html.replace(/((?:<li>.*<\/li>\s*)+)/g, '<ul class="ask-list">$1</ul>');
-
-    // Numbered lists
-    html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
-
-    // Paragraphs
-    html = html.replace(/\n\n/g, '</p><p>');
-    html = html.replace(/\n/g, '<br>');
-
-    // Wrap in container
-    html = `<div class="ask-response"><p>${html}</p></div>`;
-
-    // Clean empty paragraphs
-    html = html.replace(/<p>\s*<\/p>/g, '');
-    html = html.replace(/<p>\s*<(h[34])/g, '<$1');
-    html = html.replace(/<\/h[34]>\s*<\/p>/g, function(m) { return m.replace('</p>', ''); });
-
-    return html;
-}
 
 async function askQuestion() {
     const input = document.getElementById('ask-input');
@@ -679,13 +560,13 @@ async function askQuestion() {
     const messages = document.getElementById('chat-messages');
 
     // User message
-    messages.innerHTML += `<div class="chat-msg user"><strong>You</strong><div class="msg-content"><p>${escHtml(question)}</p></div></div>`;
+    messages.innerHTML += `<div class="chat-msg user"><strong>You</strong><p>${escHtml(question)}</p></div>`;
     input.value = '';
     messages.scrollTop = messages.scrollHeight;
 
     // Loading
     const loadingId = 'msg-' + Date.now();
-    messages.innerHTML += `<div class="chat-msg bot" id="${loadingId}"><strong>Rivyu</strong><div class="msg-content"><div class="typing-indicator"><span></span><span></span><span></span></div></div></div>`;
+    messages.innerHTML += `<div class="chat-msg bot" id="${loadingId}"><strong>Rivyu</strong><p>Thinking...</p></div>`;
     messages.scrollTop = messages.scrollHeight;
 
     try {
@@ -697,31 +578,15 @@ async function askQuestion() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Failed');
 
-        document.getElementById(loadingId).querySelector('.msg-content').innerHTML = formatMarkdown(data.answer);
+        document.getElementById(loadingId).querySelector('p').textContent = data.answer;
     } catch (e) {
-        document.getElementById(loadingId).querySelector('.msg-content').innerHTML = `<p class="ask-error">Error: ${escHtml(e.message)}</p>`;
+        document.getElementById(loadingId).querySelector('p').textContent = `Error: ${e.message}`;
     }
     messages.scrollTop = messages.scrollHeight;
 }
 
-function askPreset(btn) {
-    const input = document.getElementById('ask-input');
-    input.value = btn.textContent;
-    askQuestion();
-}
-
 function downloadComplaintsCSV() {
     window.open(`${API}/api/export/complaints.csv`, '_blank');
-}
-
-function triggerDashboardMotion() {
-    ['stats-bar', 'alerts-grid', 'themes-grid', 'evidence-list'].forEach(id => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        el.classList.remove('refresh-flash');
-        void el.offsetWidth;
-        el.classList.add('refresh-flash');
-    });
 }
 
 // --- Helpers ---
@@ -750,11 +615,10 @@ async function restoreState() {
             }));
             updateSourcesSummary();
         }
-        // Start on landing page
-        showPage('landing');
+        // Keep reload behavior predictable for demos: always open Sources first.
+        showPage('sources');
     } catch (e) {
-        // First visit — show landing
-        showPage('landing');
+        // Silently fail — first visit
     }
 }
 

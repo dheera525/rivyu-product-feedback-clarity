@@ -78,10 +78,10 @@ class AskRequest(BaseModel):
 class AnalyzeRequest(BaseModel):
     use_demo: bool = False
 
-# Demo-safe runtime caps (keep latency predictable).
-MAX_PLAYSTORE_COUNT = 80
-MAX_REDDIT_COUNT = 80
-MAX_ANALYZE_ITEMS = 120
+# Runtime caps (raised for realistic demos while keeping latency bounded).
+MAX_PLAYSTORE_COUNT = 300
+MAX_REDDIT_COUNT = 300
+MAX_ANALYZE_ITEMS = 220
 
 
 # --- App setup ---
@@ -309,7 +309,7 @@ async def export_complaints():
     buf = io.StringIO()
     writer = csv.DictWriter(
         buf,
-        fieldnames=["id", "date", "source", "author", "rating", "category", "urgency", "sentiment", "summary", "text"]
+        fieldnames=["id", "date", "source", "author", "rating", "core_bucket", "risk_tag", "urgency", "sentiment", "summary", "text"]
     )
     writer.writeheader()
     for item in complaints:
@@ -319,7 +319,8 @@ async def export_complaints():
             "source": item.get("source", ""),
             "author": item.get("author", ""),
             "rating": item.get("rating", ""),
-            "category": ",".join(item.get("category", [])) if isinstance(item.get("category"), list) else item.get("category", ""),
+            "core_bucket": item.get("core_bucket", "Other"),
+            "risk_tag": item.get("risk_tag", "none"),
             "urgency": item.get("urgency", ""),
             "sentiment": item.get("sentiment", ""),
             "summary": item.get("summary", ""),

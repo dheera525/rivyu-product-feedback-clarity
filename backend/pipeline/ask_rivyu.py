@@ -15,50 +15,69 @@ def ask_rivyu(question, themes, alerts, processed_items):
 
     context = {
         "total_feedback_items": len(processed_items),
-        "alerts": alerts[:10],
+        "alerts": [
+            {
+                "title": a.get("title", ""),
+                "severity": a.get("severity", ""),
+                "core_bucket": a.get("core_bucket", ""),
+                "risk_tag": a.get("risk_tag", ""),
+                "risk_score": a.get("risk_score", 0),
+                "evidence_count": a.get("evidence_count", 0),
+                "suggested_action": a.get("suggested_action", "")
+            }
+            for a in alerts[:8]
+        ],
         "top_themes": [
             {
-                "theme_id": t.get("theme_id", ""),
                 "label": t.get("label", ""),
-                "category": t.get("category", "other"),
+                "core_bucket": t.get("core_bucket", ""),
+                "risk_tag": t.get("risk_tag", "none"),
                 "count": t.get("count", 0),
                 "avg_sentiment": t.get("avg_sentiment", 0),
                 "avg_urgency": t.get("avg_urgency", 0),
                 "trend": t.get("trend", "stable"),
-                "trend_pct": t.get("trend_pct", 0)
+                "trend_pct": t.get("trend_pct", 0),
+                "top_entities": t.get("top_entities", [])[:5]
             }
             for t in top_themes
         ],
         "urgent_samples": [
             {
                 "summary": item.get("summary", ""),
-                "category": item.get("category", ["other"]),
+                "core_bucket": item.get("core_bucket", "Other"),
+                "risk_tag": item.get("risk_tag", "none"),
                 "urgency": item.get("urgency", 3),
                 "sentiment": item.get("sentiment", 0),
-                "text": item.get("text", "")
             }
             for item in urgent_items
         ]
     }
 
-    prompt = f"""
-You are Rivyu, an AI product analyst.
+    prompt = f"""You are Rivyu, an AI product analyst assistant.
 
 Answer the PM's question based ONLY on the feedback data provided below.
 
+FORMAT YOUR RESPONSE WITH CLEAR SECTIONS:
+- Use **bold** for key terms
+- Use bullet points (- ) for lists
+- Structure your answer with these sections when relevant:
+  ## Summary
+  ## Key Risks
+  ## Recommended Actions
+
 Rules:
-- Be specific
-- Use evidence from themes/alerts
-- Recommend actions
-- Do NOT hallucinate
-- Keep answer under 250 words
+- Be specific and data-driven
+- Reference actual theme names, counts, and risk tags
+- Recommend concrete actions
+- Do NOT hallucinate or make up data
+- Keep answer under 300 words
+- Make the answer scannable — avoid long paragraphs
 
 CONTEXT:
 {json.dumps(context, indent=2)}
 
 USER QUESTION:
-{question}
-"""
+{question}"""
 
     def deterministic_answer():
         q = question.lower()
@@ -69,18 +88,39 @@ USER QUESTION:
 
         if "new" in q or "recent" in q or "last" in q:
             focus = rising[:3] if rising else top[:3]
-            lines = [f"- {t.get('label','Theme')}: {t.get('count',0)} mentions, trend {t.get('trend','stable')} ({t.get('trend_pct',0)}%)" for t in focus]
+            lines = []
+            for t in focus:
+                risk = t.get("risk_tag", "none")
+                risk_label = f" [{risk}]" if risk != "none" else ""
+                lines.append(f"- **{t.get('label', 'Theme')}**: {t.get('count', 0)} mentions, "
+                             f"trend {t.get('trend', 'stable')} ({t.get('trend_pct', 0)}%){risk_label}")
             return (
-                "Newest issue signals from current run:\n"
-                + ("\n".join(lines) if lines else "- No clear new/rising issue signal yet.")
-                + f"\n\nPriority actions:\n- Review {len(critical)} high/critical alerts first.\n- Triage {len(urgent)} high-urgency items for immediate fixes."
+                "## Summary\nNewest issue signals from current analysis:\n\n"
+                + ("\n".join(lines) if lines else "- No clear new/rising signal detected.\n")
+                + f"\n\n## Recommended Actions\n"
+                + f"- Review {len(critical)} high/critical alerts first\n"
+                + f"- Triage {len(urgent)} high-urgency items for immediate fixes"
             )
 
-        lines = [f"- {t.get('label','Theme')}: {t.get('count',0)} mentions, urgency {t.get('avg_urgency',0)}/5, trend {t.get('trend','stable')}" for t in top[:3]]
+        lines = []
+        for t in top[:3]:
+            risk = t.get("risk_tag", "none")
+            risk_label = f" [{risk}]" if risk != "none" else ""
+            lines.append(f"- **{t.get('label', 'Theme')}**: {t.get('count', 0)} mentions, "
+                         f"urgency {t.get('avg_urgency', 0)}/5, "
+                         f"trend {t.get('trend', 'stable')}{risk_label}")
+
+        alert_lines = []
+        for a in critical[:3]:
+            alert_lines.append(f"- {a.get('title', 'Alert')}: risk score {a.get('risk_score', 0)}")
+
         return (
-            "Current top issues from this dataset:\n"
-            + ("\n".join(lines) if lines else "- No strong issue clusters detected.")
-            + f"\n\nWhat to do next:\n- Fix themes behind {len(critical)} high/critical alerts first.\n- Review top 10 urgent comments and assign owners."
+            "## Summary\nTop issues from current dataset:\n\n"
+            + ("\n".join(lines) if lines else "- No strong issue clusters detected.\n")
+            + (f"\n\n## Key Risks\n" + "\n".join(alert_lines) if alert_lines else "")
+            + f"\n\n## Recommended Actions\n"
+            + f"- Address themes behind {len(critical)} high/critical alerts first\n"
+            + f"- Review top {min(10, len(urgent))} urgent comments and assign owners"
         )
 
     try:
@@ -93,9 +133,9 @@ USER QUESTION:
         note = ""
         error_str = str(e).lower()
         if "insufficient_quota" in error_str and "openai" in error_str:
-            note = "\n\nNote: OpenAI quota is exhausted for this key. Add billing/credits in your OpenAI account or use another key."
+            note = "\n\n*Note: OpenAI quota exhausted. Add billing/credits or use another key.*"
         elif "quota" in error_str or "resource_exhausted" in error_str:
-            note = "\n\nNote: Gemini quota is currently exhausted. Add OPENAI_API_KEY in `.env` (with active credits) for automatic fallback."
+            note = "\n\n*Note: Gemini quota exhausted. Add OPENAI_API_KEY for fallback.*"
         return deterministic_answer() + note
 
 
