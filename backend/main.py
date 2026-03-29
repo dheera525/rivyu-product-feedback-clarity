@@ -237,7 +237,8 @@ async def ask(req: AskRequest):
     if not store["processed_items"]:
         if store["raw_items"]:
             # Auto-analyze if raw items exist so Ask works in demo and live flows.
-            auto_results = run_pipeline(store["raw_items"][:MAX_ANALYZE_ITEMS])
+            analysis_input = store["raw_items"][:MAX_ANALYZE_ITEMS]
+            auto_results = run_pipeline(analysis_input)
             auto_results["run_meta"] = {
                 "analysis_id": f"run_{uuid.uuid4().hex[:10]}",
                 "analyzed_at": datetime.now(timezone.utc).isoformat(),
@@ -247,7 +248,23 @@ async def ask(req: AskRequest):
             save_to_disk()
             store = get_store()
         else:
-            raise HTTPException(status_code=400, detail="No data loaded. Ingest or load demo data first.")
+            # Demo-safe behavior: if user lands on Ask first, auto-bootstrap with demo data.
+            print("📦 No data loaded for Ask. Auto-loading demo dataset...")
+            demo_items = get_demo_items()
+            clear_store()
+            set_raw_items(demo_items)
+            add_source({"type": "demo", "id": "demo_dataset", "count": len(demo_items)})
+
+            analysis_input = demo_items[:MAX_ANALYZE_ITEMS]
+            auto_results = run_pipeline(analysis_input)
+            auto_results["run_meta"] = {
+                "analysis_id": f"run_{uuid.uuid4().hex[:10]}",
+                "analyzed_at": datetime.now(timezone.utc).isoformat(),
+                "mode": "auto_demo_for_ask"
+            }
+            set_pipeline_results(auto_results)
+            save_to_disk()
+            store = get_store()
 
     answer = ask_rivyu(
         question=req.question,

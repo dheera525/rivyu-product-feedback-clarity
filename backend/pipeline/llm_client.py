@@ -16,10 +16,38 @@ _openai_client = None
 _gemini_blocked_until = 0.0
 
 
+def _get_api_key(name):
+    """
+    Read provider key from env and normalize common copy/paste issues.
+    Render/CI env values sometimes include quotes or trailing spaces.
+    """
+    raw = os.getenv(name)
+    if raw is None:
+        return None
+    key = str(raw).strip().strip('"').strip("'")
+    if not key:
+        return None
+    if key.lower() in {"none", "null", "undefined", "your_key_here", "changeme"}:
+        return None
+    return key
+
+
+def _openai_models():
+    preferred = _get_api_key("OPENAI_MODEL")
+    defaults = ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4o"]
+    models = []
+    if preferred:
+        models.append(preferred)
+    for model in defaults:
+        if model not in models:
+            models.append(model)
+    return models
+
+
 def get_gemini_client():
     global _gemini_client
     if _gemini_client is None:
-        api_key = os.getenv("GEMINI_API_KEY")
+        api_key = _get_api_key("GEMINI_API_KEY")
         if not api_key:
             return None
         from google import genai
@@ -30,7 +58,7 @@ def get_gemini_client():
 def get_openai_client():
     global _openai_client
     if _openai_client is None:
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = _get_api_key("OPENAI_API_KEY")
         if not api_key:
             return None
         from openai import OpenAI
@@ -107,17 +135,25 @@ def call_llm(prompt, expect_json=False):
 
     # Try OpenAI fallback
     if openai:
-        try:
-            response = openai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3
-            )
-            text = response.choices[0].message.content
-            return _prepare_text(text, expect_json=expect_json, provider="OpenAI")
-        except Exception as e:
-            print(f"⚠️  OpenAI error: {e}")
-            errors.append(("openai", e))
+        last_openai_error = None
+        for model in _openai_models():
+            try:
+                response = openai.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3
+                )
+                text = response.choices[0].message.content
+                return _prepare_text(text, expect_json=expect_json, provider=f"OpenAI:{model}")
+            except Exception as e:
+                last_openai_error = e
+                print(f"⚠️  OpenAI ({model}) error: {e}")
+                err = str(e).lower()
+                model_error = any(k in err for k in ["model", "not found", "does not exist", "unsupported", "access"])
+                if not model_error:
+                    break
+        if last_openai_error:
+            errors.append(("openai", last_openai_error))
     elif gemini and gemini_quota_error:
         # Make this explicit so caller can take fast deterministic fallback path.
         raise RuntimeError("Gemini quota exceeded and OPENAI_API_KEY is not configured.")
