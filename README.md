@@ -1,6 +1,6 @@
 # Rivyu
 
-Rivyu is a FastAPI-based feedback analysis application for aggregating user feedback from Google Play, Reddit, CSV uploads, and demo data.  
+Rivyu is a FastAPI-based feedback analysis application for aggregating user feedback from Google Play, Reddit, X, YouTube comments, Gmail, CSV uploads, and demo data.  
 It classifies items, groups themes, detects trends, generates alerts, and exposes an Ask interface over the current analyzed dataset.
 
 ## Tech Stack
@@ -16,6 +16,9 @@ It classifies items, groups themes, detects trends, generates alerts, and expose
 - Multi-source ingestion:
   - Google Play reviews
   - Reddit posts
+  - X posts (username or query)
+  - YouTube top-level comments
+  - Gmail messages (Google OAuth connect, with optional app-password fallback)
   - CSV (`text` column)
   - Demo dataset
 - Analysis pipeline:
@@ -38,7 +41,7 @@ It classifies items, groups themes, detects trends, generates alerts, and expose
 backend/
   main.py                 # FastAPI app and API routes
   store.py                # In-memory + JSON persistence layer
-  ingest/                 # Source connectors (playstore, reddit, csv)
+  ingest/                 # Source connectors (playstore, reddit, x, youtube, gmail, csv)
   pipeline/               # classify, grouping, trend, alerts, llm client, ask
 frontend/
   index.html
@@ -63,6 +66,11 @@ Required (at least one recommended in production):
 Optional:
 
 - `OPENAI_MODEL` (preferred OpenAI model; fallback chain is still applied)
+- `X_BEARER_TOKEN` (used by `/api/ingest/x` if token not sent in request)
+- `YOUTUBE_API_KEY` (used by `/api/ingest/youtube` if key not sent in request)
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (required for Gmail OAuth connect flow)
+- `GOOGLE_REDIRECT_URI` (optional explicit callback URL; defaults to `/api/auth/google/callback`)
+- `GMAIL_INTAKE_EMAIL` / `GMAIL_APP_PASSWORD` (optional fallback for single shared inbox mode)
 - `PORT` (default: `8000`)
 
 ## Local Run
@@ -94,6 +102,14 @@ docker run --rm -p 8000:8000 \
 
 - `POST /api/ingest/playstore` - ingest Google Play reviews
 - `POST /api/ingest/reddit` - ingest Reddit posts
+- `POST /api/ingest/x` - ingest X posts
+- `POST /api/ingest/x/mentions` - ingest latest X posts mentioning a company name/handle
+- `POST /api/ingest/youtube` - ingest YouTube comments
+- `POST /api/ingest/gmail` - ingest Gmail messages
+- `GET /api/auth/google/start` - start Gmail OAuth login
+- `GET /api/auth/google/callback` - Gmail OAuth callback
+- `GET /api/auth/google/status` - Gmail OAuth connection status
+- `POST /api/auth/google/disconnect` - disconnect Gmail OAuth
 - `POST /api/ingest/csv` - ingest CSV feedback
 - `POST /api/ingest/demo` - load demo dataset
 - `POST /api/analyze` - run analysis pipeline
@@ -137,3 +153,6 @@ Reference: `DEPLOY.md`
 - Do not commit `.env` or API keys.
 - Rotate keys if they are exposed.
 - Store secrets in provider-managed environment variables (Render Environment panel).
+- Gmail now supports OAuth login for support inbox access.
+- Legacy fallback still supports Gmail App Password (not your normal account password).
+- Company bucket mode: pass `company_bucket` and the backend will filter by forwarding alias (`to:inbox+bucket@...`) so one inbox can serve multiple companies.
