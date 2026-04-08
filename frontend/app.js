@@ -310,7 +310,7 @@ async function resetSession() {
     if (heroState) heroState.textContent = 'Awaiting source connections';
     const heroStateWrap = document.querySelector('.hero-status');
     if (heroStateWrap) heroStateWrap.classList.remove('ready');
-    ['gmail-status', 'csv-status'].forEach(id => {
+    ['gp-status', 'reddit-status', 'gmail-status', 'csv-status'].forEach(id => {
         const el = document.getElementById(id);
         if (el) { el.textContent = ''; el.className = 'source-status'; }
     });
