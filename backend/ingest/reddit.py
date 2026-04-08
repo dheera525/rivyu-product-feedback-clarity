@@ -10,6 +10,11 @@ HEADERS = {"User-Agent": "Rivyu/1.0 (feedback-analysis-tool)"}
 
 def fetch_reddit_posts(subreddit, query="", count=50):
     """Fetch posts from a subreddit, optionally filtered by search query."""
+    subreddit = _normalize_subreddit(subreddit)
+    if not subreddit:
+        print("❌ Reddit subreddit is empty after normalization.")
+        return []
+
     target_count = max(1, int(count or 50))
     print(
         f"🔍 Fetching up to {target_count} posts from r/{subreddit}"
@@ -38,6 +43,7 @@ def fetch_reddit_posts(subreddit, query="", count=50):
             if after:
                 params["after"] = after
 
+            params["raw_json"] = 1
             resp = requests.get(url, headers=HEADERS, params=params, timeout=15)
             resp.raise_for_status()
             data = resp.json()
@@ -94,3 +100,15 @@ def fetch_reddit_posts(subreddit, query="", count=50):
     items = [i for i in items if i["text"] and len(i["text"]) > 10]
     print(f"✅ Fetched {len(items)} Reddit posts")
     return items
+
+
+def _normalize_subreddit(subreddit):
+    """Accept values like 'whatsapp', 'r/whatsapp', '/r/whatsapp'."""
+    sub = (subreddit or "").strip().lower()
+    if not sub:
+        return ""
+    if sub.startswith("/r/"):
+        sub = sub[3:]
+    elif sub.startswith("r/"):
+        sub = sub[2:]
+    return sub.strip("/")
