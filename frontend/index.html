@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rivyu — AI Product Feedback Intelligence</title>
-    <link rel="stylesheet" href="/static/style.css?v=20260329-v2">
+    <link rel="stylesheet" href="/static/style.css?v=20260408-v6">
 </head>
 <body>
     <div id="app">
@@ -47,7 +47,7 @@
                         <span class="step-num">01</span>
                     </div>
                     <h3>Connect Sources</h3>
-                    <p>Pull reviews from Google Play, Reddit, or upload CSV feedback files.</p>
+                    <p>Connect Gmail forwarding buckets now. X integration is coming soon.</p>
                 </div>
                 <div class="landing-step">
                     <div class="landing-step-icon">
@@ -136,38 +136,38 @@
 
             <div class="source-experience">
                 <div class="source-grid">
-                    <!-- Google Play -->
+                    <!-- Gmail -->
                     <div class="source-card">
-                        <div class="source-icon">📱</div>
-                        <h3>Google Play Reviews</h3>
-                        <p>Pull recent reviews by app ID</p>
+                        <div class="source-icon">✉️</div>
+                        <h3>Gmail Inbox</h3>
+                        <p>Forward client complaints to intake aliases and analyze bucket-wise.</p>
                         <div class="source-form">
-                            <input type="text" id="gp-app-id" placeholder="e.g. com.whatsapp" />
-                            <input type="number" id="gp-count" value="80" min="10" max="300" />
-                            <button onclick="ingestPlayStore()" class="btn btn-primary">Fetch Reviews</button>
+                            <input type="email" id="gmail-email" placeholder="Intake inbox (e.g. rivyuinbox@gmail.com)" oninput="updateGmailAliasPreview()" />
+                            <input type="password" id="gmail-password" placeholder="Gmail app password" />
+                            <input type="text" id="gmail-bucket" placeholder="Company bucket (e.g. acme)" oninput="updateGmailAliasPreview()" />
+                            <div id="gmail-alias-preview" class="system-state-text">Forwarding alias preview: add intake email + bucket.</div>
+                            <input type="text" id="gmail-folder" placeholder="Folder/label (default: INBOX)" />
+                            <input type="text" id="gmail-query" placeholder="Extra filter (optional, e.g. refund OR crash)" />
+                            <input type="number" id="gmail-count" value="80" min="10" max="300" />
+                            <button id="gmail-fetch-btn" onclick="ingestGmail()" class="btn btn-primary">Fetch Bucket Emails</button>
                         </div>
-                        <div id="gp-status" class="source-status"></div>
-                    </div>
-
-                    <!-- Reddit -->
-                    <div class="source-card">
-                        <div class="source-icon">🔍</div>
-                        <h3>Reddit Posts</h3>
-                        <p>Pull recent posts from a subreddit</p>
-                        <div class="source-form">
-                            <input type="text" id="reddit-sub" placeholder="e.g. whatsapp" />
-                            <input type="text" id="reddit-query" placeholder="Search query (optional)" />
-                            <input type="number" id="reddit-count" value="80" min="10" max="300" />
-                            <button onclick="ingestReddit()" class="btn btn-primary">Fetch Posts</button>
-                        </div>
-                        <div id="reddit-status" class="source-status"></div>
+                        <div id="gmail-status" class="source-status"></div>
                     </div>
 
                     <!-- CSV -->
                     <div class="source-card">
                         <div class="source-icon">📄</div>
-                        <h3>CSV Reviews</h3>
-                        <p>Upload a CSV containing a `text` column</p>
+                        <div class="source-title-row">
+                            <h3>CSV Complaints</h3>
+                            <button type="button" class="info-btn" onclick="toggleCsvFormatInfo()" aria-label="CSV format help">i</button>
+                        </div>
+                        <p>Upload exported customer call/email complaint logs.</p>
+                        <div id="csv-format-info" class="csv-format-info hidden">
+                            <strong>Expected CSV format</strong>
+                            <p>Required: <code>text</code> (or <code>feedback/review/comment/content</code>)</p>
+                            <p>Optional: <code>date</code>, <code>author</code>, <code>rating</code>, <code>source</code></p>
+                            <p>Example row: <code>"Payment failed on checkout","2026-04-08","Customer 102",1,"call_center"</code></p>
+                        </div>
                         <div class="source-form">
                             <input type="file" id="csv-file" accept=".csv" />
                             <button onclick="ingestCSV()" class="btn btn-primary">Upload CSV</button>
@@ -175,15 +175,14 @@
                         <div id="csv-status" class="source-status"></div>
                     </div>
 
-                    <!-- Demo -->
-                    <div class="source-card source-card-demo">
-                        <div class="source-icon">🎯</div>
-                        <h3>Demo Dataset</h3>
-                        <p>Load sample feedback for a quick walkthrough</p>
+                    <!-- X Coming Soon -->
+                    <div class="source-card source-card-coming">
+                        <div class="source-icon">𝕏</div>
+                        <h3>X Integration</h3>
+                        <p>Coming soon. We’ll auto-scan brand mentions once API access is finalized.</p>
                         <div class="source-form">
-                            <button onclick="loadDemo()" class="btn btn-accent">Load Demo Data</button>
+                            <button class="btn btn-small" disabled>Coming Soon</button>
                         </div>
-                        <div id="demo-status" class="source-status"></div>
                     </div>
                 </div>
 
@@ -333,6 +332,6 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=20260329-v2"></script>
+    <script src="/static/app.js?v=20260408-v6"></script>
 </body>
 </html>

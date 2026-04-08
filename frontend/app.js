@@ -10,6 +10,7 @@ let currentTimeFilter = 'all';
 let currentThemeScope = 'all';
 const SAFE_MAX_PLAYSTORE = 300;
 const SAFE_MAX_REDDIT = 300;
+const SAFE_MAX_GMAIL = 300;
 
 // --- Navigation ---
 
@@ -97,6 +98,94 @@ async function ingestReddit() {
     }
 }
 
+async function ingestGmail() {
+    const email = document.getElementById('gmail-email').value.trim();
+    const appPassword = document.getElementById('gmail-password').value.trim();
+    const companyBucket = document.getElementById('gmail-bucket').value.trim();
+    const folder = document.getElementById('gmail-folder').value.trim() || 'INBOX';
+    const query = document.getElementById('gmail-query').value.trim();
+    const requestedCount = parseInt(document.getElementById('gmail-count').value) || 50;
+    const count = Math.max(10, Math.min(requestedCount, SAFE_MAX_GMAIL));
+    const status = document.getElementById('gmail-status');
+
+    if (!companyBucket) {
+        status.textContent = 'Enter company bucket (e.g. acme)';
+        status.className = 'source-status error';
+        return;
+    }
+
+    if (!email || !appPassword) {
+        status.textContent = 'Enter intake email + app password';
+        status.className = 'source-status error';
+        return;
+    }
+
+    status.textContent = 'Fetching Gmail messages...';
+    status.className = 'source-status loading';
+
+    try {
+        const res = await fetch(`${API}/api/ingest/gmail`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                email,
+                app_password: appPassword,
+                company_bucket: companyBucket,
+                folder,
+                query,
+                count
+            })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed');
+        status.textContent = `✓ Fetched ${data.count} emails${data.forward_alias ? ` from ${data.forward_alias}` : ''}`;
+        status.className = 'source-status success';
+        const sourceId = data.bucket_id
+            ? `${(email || 'gmail')}::${data.bucket_id}`
+            : (email || 'gmail');
+        onSourceAdded('gmail', sourceId, data.count);
+    } catch (e) {
+        status.textContent = `Error: ${e.message}`;
+        status.className = 'source-status error';
+    }
+}
+
+function updateGmailAliasPreview() {
+    const preview = document.getElementById('gmail-alias-preview');
+    const email = document.getElementById('gmail-email')?.value?.trim() || '';
+    const bucket = normalizeBucketKey(document.getElementById('gmail-bucket')?.value || '');
+    if (!preview) return;
+    if (!email || !bucket || !email.includes('@')) {
+        preview.textContent = 'Forwarding alias preview: add intake email + bucket.';
+        return;
+    }
+
+    const parts = email.split('@');
+    const local = (parts[0] || '').split('+')[0];
+    const domain = parts[1] || '';
+    if (!local || !domain) {
+        preview.textContent = 'Forwarding alias preview: add intake email + bucket.';
+        return;
+    }
+    preview.textContent = `Forwarding alias: ${local}+${bucket}@${domain}`;
+}
+
+function normalizeBucketKey(value) {
+    return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^[-_]+|[-_]+$/g, '')
+        .slice(0, 64);
+}
+
+function toggleCsvFormatInfo() {
+    const panel = document.getElementById('csv-format-info');
+    if (!panel) return;
+    panel.classList.toggle('hidden');
+}
+
 async function ingestCSV() {
     const fileInput = document.getElementById('csv-file');
     const status = document.getElementById('csv-status');
@@ -167,7 +256,7 @@ function updateSourcesSummary() {
 
     summary.classList.remove('hidden');
     list.innerHTML = connectedSources.map(s =>
-        `<span class="source-tag">${s.type === 'google_play' ? '📱' : s.type === 'reddit' ? '🔍' : s.type === 'csv' ? '📄' : '🎯'} ${s.id} (${s.count})</span>`
+        `<span class="source-tag">${sourceIcon(s.type)} ${s.id} (${s.count})</span>`
     ).join('');
     total.textContent = totalIngested;
     analyzeBtn.disabled = totalIngested === 0;
@@ -180,6 +269,17 @@ function updateSourcesSummary() {
     if (heroState) {
         heroState.textContent = `${connectedSources.length} source${connectedSources.length === 1 ? '' : 's'} connected · analysis ready`;
     }
+}
+
+function sourceIcon(sourceType) {
+    const iconMap = {
+        google_play: '📱',
+        reddit: '🔍',
+        gmail: '✉️',
+        csv: '📄',
+        demo: '🎯'
+    };
+    return iconMap[sourceType] || '🧩';
 }
 
 function clearDashboardView() {
@@ -210,10 +310,13 @@ async function resetSession() {
     if (heroState) heroState.textContent = 'Awaiting source connections';
     const heroStateWrap = document.querySelector('.hero-status');
     if (heroStateWrap) heroStateWrap.classList.remove('ready');
-    ['gp-status', 'reddit-status', 'csv-status', 'demo-status'].forEach(id => {
+    ['gmail-status', 'csv-status'].forEach(id => {
         const el = document.getElementById(id);
         if (el) { el.textContent = ''; el.className = 'source-status'; }
     });
+    const csvInfo = document.getElementById('csv-format-info');
+    if (csvInfo) csvInfo.classList.add('hidden');
+    updateGmailAliasPreview();
     clearDashboardView();
     showPage('sources');
 }
@@ -739,20 +842,23 @@ function escAttr(str) {
 // --- Restore state from backend on page load ---
 async function restoreState() {
     try {
-        const res = await fetch(`${API}/api/status`);
-        if (!res.ok) return;
-        const data = await res.json();
+        updateGmailAliasPreview();
 
-        if (data.raw_count > 0) {
-            totalIngested = data.raw_count;
-            connectedSources = (data.sources || []).map(s => ({
-                type: s.type, id: s.id, count: s.count
-            }));
-            updateSourcesSummary();
+        const res = await fetch(`${API}/api/status`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data.raw_count > 0) {
+                totalIngested = data.raw_count;
+                connectedSources = (data.sources || []).map(s => ({
+                    type: s.type, id: s.id, count: s.count
+                }));
+                updateSourcesSummary();
+            }
         }
         // Start on landing page
         showPage('landing');
     } catch (e) {
+        updateGmailAliasPreview();
         // First visit — show landing
         showPage('landing');
     }
