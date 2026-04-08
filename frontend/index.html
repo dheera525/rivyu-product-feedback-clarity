@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rivyu — AI Product Feedback Intelligence</title>
-    <link rel="stylesheet" href="/static/style.css?v=20260408-v6">
+    <link rel="stylesheet" href="/static/style.css?v=20260408-v7">
 </head>
 <body>
     <div id="app">
@@ -47,7 +47,7 @@
                         <span class="step-num">01</span>
                     </div>
                     <h3>Connect Sources</h3>
-                    <p>Connect Gmail forwarding buckets now. X integration is coming soon.</p>
+                    <p>Connect Play Store, Reddit, Gmail buckets, or CSV. X integration is coming soon.</p>
                 </div>
                 <div class="landing-step">
                     <div class="landing-step-icon">
@@ -136,6 +136,33 @@
 
             <div class="source-experience">
                 <div class="source-grid">
+                    <!-- Google Play -->
+                    <div class="source-card">
+                        <div class="source-icon">📱</div>
+                        <h3>Google Play Reviews</h3>
+                        <p>Pull recent reviews by app ID</p>
+                        <div class="source-form">
+                            <input type="text" id="gp-app-id" placeholder="e.g. com.whatsapp" />
+                            <input type="number" id="gp-count" value="80" min="10" max="300" />
+                            <button onclick="ingestPlayStore()" class="btn btn-primary">Fetch Reviews</button>
+                        </div>
+                        <div id="gp-status" class="source-status"></div>
+                    </div>
+
+                    <!-- Reddit -->
+                    <div class="source-card">
+                        <div class="source-icon">🔍</div>
+                        <h3>Reddit Posts</h3>
+                        <p>Pull recent posts from a subreddit</p>
+                        <div class="source-form">
+                            <input type="text" id="reddit-sub" placeholder="e.g. whatsapp" />
+                            <input type="text" id="reddit-query" placeholder="Search query (optional)" />
+                            <input type="number" id="reddit-count" value="80" min="10" max="300" />
+                            <button onclick="ingestReddit()" class="btn btn-primary">Fetch Posts</button>
+                        </div>
+                        <div id="reddit-status" class="source-status"></div>
+                    </div>
+
                     <!-- Gmail -->
                     <div class="source-card">
                         <div class="source-icon">✉️</div>
@@ -332,6 +359,6 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=20260408-v6"></script>
+    <script src="/static/app.js?v=20260408-v7"></script>
 </body>
 </html>
