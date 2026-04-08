@@ -209,16 +209,25 @@ async function ingestCSV() {
 
 async function loadDemo() {
     const status = document.getElementById('demo-status');
-    status.textContent = 'Loading demo data...'; status.className = 'source-status loading';
+    if (status) {
+        status.textContent = 'Loading demo data...';
+        status.className = 'source-status loading';
+    }
 
     try {
         const res = await fetch(`${API}/api/ingest/demo`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Failed');
-        status.textContent = `✓ Loaded ${data.count} demo items`; status.className = 'source-status success';
+        if (status) {
+            status.textContent = `✓ Loaded ${data.count} demo items`;
+            status.className = 'source-status success';
+        }
         onSourceAdded('demo', 'demo_dataset', data.count);
     } catch (e) {
-        status.textContent = `Error: ${e.message}`; status.className = 'source-status error';
+        if (status) {
+            status.textContent = `Error: ${e.message}`;
+            status.className = 'source-status error';
+        }
     }
 }
 
@@ -310,7 +319,7 @@ async function resetSession() {
     if (heroState) heroState.textContent = 'Awaiting source connections';
     const heroStateWrap = document.querySelector('.hero-status');
     if (heroStateWrap) heroStateWrap.classList.remove('ready');
-    ['gp-status', 'reddit-status', 'gmail-status', 'csv-status'].forEach(id => {
+    ['gp-status', 'reddit-status', 'gmail-status', 'csv-status', 'demo-status'].forEach(id => {
         const el = document.getElementById(id);
         if (el) { el.textContent = ''; el.className = 'source-status'; }
     });

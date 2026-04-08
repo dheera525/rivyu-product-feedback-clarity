@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rivyu — AI Product Feedback Intelligence</title>
-    <link rel="stylesheet" href="/static/style.css?v=20260408-v7">
+    <link rel="stylesheet" href="/static/style.css?v=20260408-v8">
 </head>
 <body>
     <div id="app">
@@ -211,6 +211,17 @@
                             <button class="btn btn-small" disabled>Coming Soon</button>
                         </div>
                     </div>
+
+                    <!-- Demo -->
+                    <div class="source-card source-card-demo">
+                        <div class="source-icon">🎯</div>
+                        <h3>Demo Dataset</h3>
+                        <p>Load sample feedback for a quick walkthrough.</p>
+                        <div class="source-form">
+                            <button onclick="loadDemo()" class="btn btn-accent">Load Demo Data</button>
+                        </div>
+                        <div id="demo-status" class="source-status"></div>
+                    </div>
                 </div>
 
                 <aside class="source-rail">
@@ -359,6 +370,6 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=20260408-v7"></script>
+    <script src="/static/app.js?v=20260408-v8"></script>
 </body>
 </html>
