@@ -4,6 +4,7 @@ import json
 import time
 from dotenv import load_dotenv
 from llm_client import call_llm
+from emoji_signals import emoji_signals, describe_emojis
 
 load_dotenv()
 
@@ -103,7 +104,7 @@ RISK_TAGS = {"revenue_risk", "churn_risk", "trust_risk", "ux_risk",
 
 BUCKET_KEYWORDS = {
     "Crashes & App Stability": [
-        "crash", "crashes", "crashed", "freeze", "frozen", "stuck", "force close",
+        "crash", "crashes", "crashed", "crashing", "freeze", "freezes", "freezing", "frozen", "stuck", "force close",
         "won't open", "cant open", "cannot open", "startup", "launch",
         "app not opening", "stopped working", "keeps closing", "black screen"
     ],
@@ -305,7 +306,9 @@ def _extract_entities(text):
 
 def heuristic_classify_item(original):
     text = str(original.get("text", "") or "")
-    lower = text.lower()
+    emoji = emoji_signals(text)
+    # Emojis like 🐛 or 🐌 imply topic words ("bug", "slow").
+    lower = (text.lower() + " " + " ".join(emoji["topic_words"])).strip()
 
     # Score each bucket by keyword hits
     scores = {bucket: _keyword_hits(lower, kws) for bucket, kws in BUCKET_KEYWORDS.items()}
@@ -319,18 +322,29 @@ def heuristic_classify_item(original):
     raw_sent = pos_hits - neg_hits
     sentiment = 0.0 if raw_sent == 0 else max(-1.0, min(1.0, raw_sent / 4.0))
 
+    # Emojis carry sentiment too: use them alone when no sentiment words
+    # matched, otherwise blend them in.
+    if emoji["count"]:
+        if raw_sent == 0:
+            sentiment = emoji["sentiment"]
+        else:
+            sentiment = max(-1.0, min(1.0, 0.6 * sentiment + 0.4 * emoji["sentiment"]))
+    if emoji["emoji_only"] and core_bucket == "Other" and sentiment >= 0.3:
+        core_bucket = "Positive Feedback / Praise"
+
     if core_bucket == "Positive Feedback / Praise" and sentiment < 0.3:
-        sentiment = 0.6
+        sentiment = max(sentiment, 0.6) if not emoji["count"] else max(sentiment, 0.3)
     critical_buckets = {"App Bugs & Glitches", "Crashes & App Stability",
                         "Login & Account Access", "Payments, Refunds & Billing",
                         "Order Accuracy & Wrong Items"}
     if core_bucket in critical_buckets and sentiment > -0.2:
         sentiment = -0.5
 
-    # Low-signal praise demotion
-    if core_bucket == "Positive Feedback / Praise" and _is_low_signal_praise(text):
+    # Low-signal praise demotion (emoji-only reactions are kept as praise)
+    if core_bucket == "Positive Feedback / Praise" and not emoji["emoji_only"] and _is_low_signal_praise(text):
+        # Too generic to form a praise theme, but still positive.
         core_bucket = "Other"
-        sentiment = 0.1
+        sentiment = max(0.1, min(sentiment, 0.5))
 
     # Urgency
     urgency = 3
@@ -354,6 +368,10 @@ def heuristic_classify_item(original):
         confidence = min(0.9, 0.6 + (best_score * 0.08))
     elif abs(sentiment) >= 0.5:
         confidence = 0.45
+    if emoji["emoji_only"] and emoji["count"]:
+        confidence = max(confidence, 0.6)
+        if sentiment <= -0.3:
+            urgency = max(urgency, 3)
 
     # Derived fields
     category = [BUCKET_TO_CATEGORY.get(core_bucket, "other")]
@@ -369,7 +387,7 @@ def heuristic_classify_item(original):
         "category": category,
         "sentiment": round(sentiment, 2),
         "urgency": int(max(1, min(5, urgency))),
-        "summary": _build_summary(text, max_words=15),
+        "summary": describe_emojis(text, emoji) if emoji["emoji_only"] else _build_summary(text, max_words=15),
         "entities": _extract_entities(text),
         "_confidence": round(confidence, 2)
     }
@@ -404,6 +422,7 @@ For each feedback item, return:
 Rules:
 - Pick the single most specific core_bucket
 - Summaries should capture the core issue, not repeat the text
+- Emojis carry meaning: read them as sentiment (👍 ❤️ 🔥 😍 = positive, 👎 😡 💩 😭 = negative) and topic (🐛 = bug, 🐌 = slow). Emoji-only items still need a full classification; summarize them in words, e.g. "Positive emoji reaction (thumbs up)"
 - risk_tag reflects business risk: revenue_risk for money issues, churn_risk for blocking issues, stability_risk for crashes, trust_risk for fraud/quality, ux_risk for usability, support_risk for service failures, retention_risk for missing features
 - Be strict and concise
 
@@ -722,14 +741,18 @@ def assign_dynamic_buckets(items):
 
 # ── Main classify entry point ──────────────────────────────────────
 
-def classify_items(items):
+def classify_items(items, on_batch=None):
+    """Classify items in batches. `on_batch(done, total)` reports progress."""
     if not items:
         return []
 
     all_results = []
+    batches = list(chunk_list(items, size=15))
 
-    for idx, batch in enumerate(chunk_list(items, size=15), start=1):
+    for idx, batch in enumerate(batches, start=1):
         print(f"Classifying batch {idx} ({len(batch)} items)...")
+        if on_batch:
+            on_batch(idx - 1, len(batches))
 
         try:
             classified = classify_batch(batch)
