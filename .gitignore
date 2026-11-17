@@ -20,7 +20,7 @@ env/
 .vscode/
 
 # Runtime data
-data/store.json
+data/
 
 
 # Local tooling
