@@ -1,158 +1,150 @@
 # Rivyu
 
-Rivyu is a FastAPI-based feedback analysis application for aggregating user feedback from Google Play, Reddit, X, YouTube comments, Gmail, CSV uploads, and demo data.  
-It classifies items, groups themes, detects trends, generates alerts, and exposes an Ask interface over the current analyzed dataset.
+[![CI](https://github.com/dheera525/rivyu-product-feedback-clarity/actions/workflows/ci.yml/badge.svg)](https://github.com/dheera525/rivyu-product-feedback-clarity/actions/workflows/ci.yml)
+![Python 3.11](https://img.shields.io/badge/python-3.11-3776ab)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-## Tech Stack
+**AI product feedback analysis.** Rivyu pulls in app reviews, Reddit posts and support logs, classifies every item by topic, sentiment, urgency and business risk, groups them into themes with trends, raises priority alerts with suggested actions, and answers questions about the data in plain English.
 
-- Backend: FastAPI, Uvicorn
-- Frontend: Vanilla HTML/CSS/JS (served by FastAPI)
-- LLM Providers: Gemini (primary) with OpenAI fallback
-- Storage: In-memory store with JSON persistence (`data/store.json`)
-- Deployment: Docker, Render
+**[Live demo → rivyu.onrender.com](https://rivyu.onrender.com)** (click **Try the demo**; the free tier may take up to a minute to wake up)
 
-## Core Capabilities
+![Rivyu dashboard](docs/screenshots/dashboard.png)
 
-- Multi-source ingestion:
-  - Google Play reviews
-  - Reddit posts
-  - X posts (username or query)
-  - YouTube top-level comments
-  - Gmail messages (Google OAuth connect, with optional app-password fallback)
-  - CSV (`text` column)
-  - Demo dataset
-- Analysis pipeline:
-  - Item classification (LLM + heuristic fallback)
-  - Theme grouping and dynamic phrase sub-themes
-  - Trend detection
-  - Priority alert generation
-- Dashboard:
-  - Summary metrics
-  - Time-window counts (`24h`, `7d`, `total`)
-  - Source breakdown and evidence
-- Ask Rivyu:
-  - Uses analyzed context from current run
-  - Auto-bootstrap behavior if no processed data is present
-  - Deterministic fallback if live model calls fail
+## Features
 
-## Repository Structure
+- **Sources**: Google Play reviews (by app ID or store URL), Reddit posts (by subreddit and optional search), CSV upload of support tickets or survey answers, and a built-in demo dataset. Gmail and X connectors are in progress and shown as *Coming soon*.
+- **Analysis pipeline**: LLM classification into 16 product buckets with sentiment, urgency (1–5), risk tag and summary. It falls back to a keyword heuristic when no model is available, then groups items into themes and phrase-level sub-patterns, detects week-over-week trends, and scores alerts.
+- **Dashboard**: 24h / 7d / all-time views, complaint rate, source breakdown, severity-ranked alerts with suggested actions, theme cards with sentiment and trend sparklines, a searchable and filterable evidence feed, and CSV export of complaints.
+- **Ask Rivyu**: chat over the analyzed session ("What should we prioritize this sprint?"). Answers are grounded in the session's themes, alerts and the most urgent items.
+- **Reliable by design**: every LLM call has a fallback, so the app still works with no API keys at all.
 
-```text
-backend/
-  main.py                 # FastAPI app and API routes
-  store.py                # In-memory + JSON persistence layer
-  ingest/                 # Source connectors (playstore, reddit, x, youtube, gmail, csv)
-  pipeline/               # classify, grouping, trend, alerts, llm client, ask
-frontend/
-  index.html
-  style.css
-  app.js
-data/
-  store.json              # Generated at runtime
-Dockerfile
-render.yaml
-run.sh
+| Themes | Ask Rivyu |
+| --- | --- |
+| ![Themes](docs/screenshots/themes.png) | ![Ask Rivyu](docs/screenshots/ask.png) |
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Ingest
+        GP[Google Play] --> N[Normalized items]
+        RD[Reddit] --> N
+        CSV[CSV upload] --> N
+        DEMO[Demo dataset] --> N
+    end
+    N --> C[Classify<br/>bucket · sentiment · urgency · risk]
+    C --> G[Group into themes<br/>+ phrase sub-patterns]
+    G --> T[Weekly trends]
+    T --> A[Score alerts]
+    A --> S[(Session store<br/>JSON on disk)]
+    S --> D[Dashboard API]
+    S --> Q[Ask Rivyu]
 ```
 
-## Environment Variables
+**LLM fallback chain.** Each LLM call tries the next option if the previous one fails:
 
-Copy `.env.example` to `.env` for local development.
+1. **Gemini 2.5 Flash** (if `GEMINI_API_KEY` is set). Quota errors pause Gemini for the duration the API suggests.
+2. **OpenAI** (if `OPENAI_API_KEY` is set), trying `OPENAI_MODEL`, then `gpt-4o-mini`, `gpt-4.1-mini` and `gpt-4o`.
+3. **Deterministic fallback**: keyword-based classification and data-driven Ask answers (revenue, praise, priorities, trends, top issues).
 
-Required (at least one recommended in production):
+LLM output is validated (JSON shape, allowed buckets, clamped scores). Items the model drops or mislabels are filled in by the heuristic.
 
-- `OPENAI_API_KEY`
-- `GEMINI_API_KEY`
+## Run locally
 
-Optional:
-
-- `OPENAI_MODEL` (preferred OpenAI model; fallback chain is still applied)
-- `X_BEARER_TOKEN` (used by `/api/ingest/x` if token not sent in request)
-- `YOUTUBE_API_KEY` (used by `/api/ingest/youtube` if key not sent in request)
-- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (required for Gmail OAuth connect flow)
-- `GOOGLE_REDIRECT_URI` (optional explicit callback URL; defaults to `/api/auth/google/callback`)
-- `GMAIL_INTAKE_EMAIL` / `GMAIL_APP_PASSWORD` (optional fallback for single shared inbox mode)
-- `PORT` (default: `8000`)
-
-## Local Run
+Requires Python 3.11+.
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env        # optional: add GEMINI_API_KEY and/or OPENAI_API_KEY
 ./run.sh
 ```
 
-Application URLs:
+- App: http://localhost:8000
+- API docs: http://localhost:8000/docs
+- Health check: http://localhost:8000/api/health
 
-- UI: `http://localhost:8000`
-- Health: `http://localhost:8000/api/health`
-- API docs: `http://localhost:8000/docs`
+Without API keys everything still runs, using the deterministic fallback.
 
-## Docker Run
+### With Docker
 
 ```bash
 docker build -t rivyu .
-docker run --rm -p 8000:8000 \
-  -e OPENAI_API_KEY=your_key \
-  -e GEMINI_API_KEY=your_key \
-  rivyu
+docker run --rm -p 8000:8000 -e GEMINI_API_KEY=... -e OPENAI_API_KEY=... rivyu
 ```
 
-## API Overview
+## Tests
 
-- `POST /api/ingest/playstore` - ingest Google Play reviews
-- `POST /api/ingest/reddit` - ingest Reddit posts
-- `POST /api/ingest/x` - ingest X posts
-- `POST /api/ingest/x/mentions` - ingest latest X posts mentioning a company name/handle
-- `POST /api/ingest/youtube` - ingest YouTube comments
-- `POST /api/ingest/gmail` - ingest Gmail messages
-- `GET /api/auth/google/start` - start Gmail OAuth login
-- `GET /api/auth/google/callback` - Gmail OAuth callback
-- `GET /api/auth/google/status` - Gmail OAuth connection status
-- `POST /api/auth/google/disconnect` - disconnect Gmail OAuth
-- `POST /api/ingest/csv` - ingest CSV feedback
-- `POST /api/ingest/demo` - load demo dataset
-- `POST /api/analyze` - run analysis pipeline
-- `GET /api/dashboard` - get dashboard payload (`time_filter=all|7d|24h`)
-- `POST /api/ask` - ask questions against current analyzed dataset
-- `GET /api/theme/{theme_id}` - theme detail
-- `GET /api/status` - store and run status
-- `POST /api/reset` - clear store
-- `GET /api/export/complaints.csv` - export complaint-like items
-- `GET /api/health` - liveness check
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
 
-## Data Persistence Behavior
+The suite covers classification fallbacks, theme grouping, trend detection, alert ordering, CSV parsing and validation, the HTTP API, the Ask fallback, and recovery from a corrupt or half-written store. All LLM calls are mocked, so tests run offline with no keys. CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the tests and builds and smoke-tests the Docker image on every push and pull request.
 
-- Runtime data is stored in:
-  - `raw_items`
-  - `processed_items`
-  - `themes`
-  - `alerts`
-  - `stats`
-  - `sources_connected`
-  - `run_meta`
-- State is persisted to `data/store.json`.
-- Any raw data mutation invalidates derived analysis state.
-- On container restarts with ephemeral disks, prior run state may reset.
+## Project structure
 
-## Deployment (Render)
+```text
+backend/
+  main.py              FastAPI app: ingestion, analysis, dashboard, ask, export
+  store.py             In-memory session store with atomic JSON persistence
+  demo_data.py         30-item demo dataset (dates shifted to stay recent)
+  ingest/              Source connectors (playstore, reddit, csv_upload; gmail, x, youtube in progress)
+  pipeline/
+    llm_client.py      Gemini → OpenAI fallback client
+    classify.py        LLM + heuristic classification
+    grouping.py        Theme and sub-pattern grouping
+    trend.py           Weekly trend detection
+    alerts.py          Risk scoring and alert generation
+    ask_rivyu.py       Grounded Q&A with deterministic fallback
+    run_pipeline.py    Orchestrates the steps above
+frontend/              Vanilla HTML/CSS/JS served by FastAPI (no build step)
+tests/                 pytest suite
+docs/                  Screenshots and GitHub "About" text
+Dockerfile, render.yaml
+```
 
-This repository includes `render.yaml` configured for Docker deployment.
+## Main API endpoints
 
-1. Push repository to GitHub.
-2. Create a Render Web Service from the repository.
-3. Confirm Docker environment and health check path `/api/health`.
-4. Set environment variables in Render:
-   - `OPENAI_API_KEY` and/or `GEMINI_API_KEY`
-5. Deploy.
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/ingest/playstore` | Add Google Play reviews (`app_id`, `count`) |
+| `POST` | `/api/ingest/reddit` | Add Reddit posts (`subreddit`, `query`, `count`) |
+| `POST` | `/api/ingest/csv` | Upload a CSV with a `text` column |
+| `POST` | `/api/ingest/demo` | Replace the session with the demo dataset |
+| `POST` | `/api/analyze` | Run the pipeline on the current session |
+| `GET` | `/api/status` | Session state: `empty`, `ingested` or `analyzed` |
+| `GET` | `/api/dashboard?time_filter=all\|7d\|24h` | Dashboard payload |
+| `GET` | `/api/theme/{theme_id}` | Theme detail with all items |
+| `POST` | `/api/ask` | Ask a question about the analyzed data |
+| `GET` | `/api/export/complaints.csv` | Negative or urgent items as CSV |
+| `POST` | `/api/reset` | Clear the session |
 
-Reference: `DEPLOY.md`
+Full interactive docs are at `/docs`.
 
-## Security Notes
+## Configuration
 
-- Do not commit `.env` or API keys.
-- Rotate keys if they are exposed.
-- Store secrets in provider-managed environment variables (Render Environment panel).
-- Gmail now supports OAuth login for support inbox access.
-- Legacy fallback still supports Gmail App Password (not your normal account password).
-- Company bucket mode: pass `company_bucket` and the backend will filter by forwarding alias (`to:inbox+bucket@...`) so one inbox can serve multiple companies.
+| Variable | Purpose |
+| --- | --- |
+| `GEMINI_API_KEY` | Primary LLM provider (optional) |
+| `OPENAI_API_KEY` | Fallback LLM provider (optional) |
+| `OPENAI_MODEL` | Preferred OpenAI model (optional) |
+| `PORT` | Server port (default `8000`) |
+
+Set secrets in your host's environment settings (on Render: **Environment**). Never commit `.env`.
+
+## Deployment
+
+`render.yaml` deploys the Docker image to Render with `/api/health` as the health check. See [DEPLOY.md](DEPLOY.md).
+
+## Known limitations
+
+- **One shared session.** All visitors share the same in-memory dataset, which suits a single-user demo. Multi-user use would need per-session or per-workspace storage.
+- **Ephemeral storage.** On Render's free tier, data is cleared when the instance restarts or redeploys.
+- **Analysis size.** A run analyzes up to 220 items to keep latency reasonable.
+
+## License
+
+[MIT](LICENSE)

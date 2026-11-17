@@ -219,7 +219,7 @@ def build_description(theme, alert_type):
 
     signals = compute_signals(theme)
     desc = (
-        f"{count} reports in \"{core_bucket}\" bucket. "
+        f"{count} report{'' if count == 1 else 's'} in \"{core_bucket}\" bucket. "
         f"Trend: {trend}, avg urgency {avg_urgency:.1f}/5, "
         f"{signals['high_urgency_count']} high-urgency, "
         f"{int(signals['negative_ratio'] * 100)}% negative."

@@ -22,3 +22,6 @@ env/
 # Runtime data
 data/store.json
 
+
+# Local tooling
+.claude/

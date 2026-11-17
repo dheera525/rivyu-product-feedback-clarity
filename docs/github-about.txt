@@ -1,0 +1,10 @@
+Paste these into the repo's About box (gear icon next to "About" on the GitHub repo page).
+
+Description:
+AI product feedback analysis: turns app reviews, Reddit posts and support logs into themes, risk alerts and grounded answers. FastAPI + LLMs with offline fallbacks.
+
+Website:
+https://rivyu.onrender.com
+
+Topics:
+fastapi, python, llm, nlp, gemini, openai, feedback-analysis, sentiment-analysis, product-management, docker, render, vanilla-js

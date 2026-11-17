@@ -9,7 +9,7 @@
 ```
 
 Check:
-- `http://localhost:8000/api/health` returns `{"status":"ok"}`
+- `http://localhost:8000/api/health` returns `{"status":"ok", ...}`
 - UI loads at `http://localhost:8000`
 
 ### 2) Push to GitHub
@@ -39,7 +39,7 @@ You can set both for safer failover.
 ### 5) Verify production
 
 After deploy:
-- `https://<your-render-url>/api/health`
+- `https://<your-render-url>/api/health` returns `{"status":"ok", ...}`
 - Open `https://<your-render-url>/`
 - Run a quick ingest -> analyze -> dashboard -> ask flow
 
