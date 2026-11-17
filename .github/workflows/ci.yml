@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest
+        env:
+          GEMINI_API_KEY: ""
+          OPENAI_API_KEY: ""
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t rivyu:ci .
+
+      - name: Smoke test container
+        run: |
+          docker run -d --name rivyu -p 8000:8000 rivyu:ci
+          for i in $(seq 1 30); do
+            if curl -fs http://localhost:8000/api/health; then exit 0; fi
+            sleep 1
+          done
+          docker logs rivyu
+          exit 1
