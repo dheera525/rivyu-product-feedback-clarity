@@ -178,7 +178,9 @@ def test_analyze_failure_keeps_raw_data(client, monkeypatch):
 
 
 def test_half_analyzed_store_is_repaired_on_load(isolated_store):
-    with open(isolated_store.STORE_FILE, "w") as f:
+    import os
+    os.makedirs(isolated_store.sessions_dir(), exist_ok=True)
+    with open(isolated_store.session_file(), "w") as f:
         json.dump({
             "raw_items": [{"id": "1", "text": "hi"}],
             "processed_items": [{"id": "1"}],
@@ -193,7 +195,9 @@ def test_half_analyzed_store_is_repaired_on_load(isolated_store):
 
 
 def test_corrupt_store_file_starts_empty(isolated_store):
-    with open(isolated_store.STORE_FILE, "w") as f:
+    import os
+    os.makedirs(isolated_store.sessions_dir(), exist_ok=True)
+    with open(isolated_store.session_file(), "w") as f:
         f.write("{not json")
 
     assert isolated_store.load_from_disk() is False

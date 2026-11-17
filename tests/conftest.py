@@ -50,10 +50,9 @@ def isolated_store(tmp_path, monkeypatch):
     import backend.store as store
 
     monkeypatch.setattr(store, "DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(store, "STORE_FILE", str(tmp_path / "store.json"))
-    store.clear_store()
+    store.reset_all_sessions()
     yield store
-    store.clear_store()
+    store.reset_all_sessions()
 
 
 @pytest.fixture

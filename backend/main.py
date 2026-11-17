@@ -5,7 +5,9 @@ FastAPI backend serving ingestion, analysis, and dashboard APIs.
 
 import os
 import sys
+import threading
 from contextlib import asynccontextmanager
+from http.cookies import SimpleCookie
 import secrets
 import re
 from datetime import datetime, timezone
@@ -23,7 +25,7 @@ for p in [PROJECT_ROOT, PIPELINE_DIR]:
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Response, Depends, Cookie
+from fastapi import APIRouter, FastAPI, UploadFile, File, HTTPException, Request, Response, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
@@ -31,11 +33,12 @@ from pydantic import BaseModel
 
 from backend.store import (
     get_store, append_raw_items, set_raw_items, set_pipeline_results,
-    get_dashboard_data, get_theme_by_id, add_source, clear_store, save_to_disk, load_from_disk,
-    session_state
+    get_dashboard_data, get_theme_by_id, add_source, clear_store, save_to_disk,
+    session_state, set_session, reset_session, is_valid_session_id, current_session_id,
+    use_session, purge_expired_sessions
 )
 from backend.ingest.playstore import fetch_playstore_reviews
-from backend.ingest.reddit import fetch_reddit_posts, _normalize_subreddit
+from backend.ingest.reddit import fetch_reddit_posts, _normalize_subreddit, reddit_api_configured, RedditAccessError
 from backend.ingest.csv_upload import parse_csv_feedback, CSVFormatError
 from backend.ingest.x_posts import fetch_x_posts
 from backend.ingest.youtube_comments import fetch_youtube_comments
@@ -45,40 +48,82 @@ from backend.demo_data import get_demo_items
 # Import existing pipeline (these use intra-pipeline imports like "from classify import ...")
 from run_pipeline import run_pipeline
 from ask_rivyu import ask_rivyu
+import llm_client
 
 
-# --- Auth ---
+# --- Feature flags ---
 
-USERS = {
-    "admin": "rivyu2026",
-    "demo": "demo123"
-}
+def _env_flag(name):
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
-# Active sessions: token -> username
-_sessions = {}
 
-# Google OAuth state store (ephemeral).
+# Gmail, X and YouTube connectors are unfinished and hidden in the UI.
+# Their endpoints only work when this flag is set (useful for local work).
+EXPERIMENTAL_SOURCES = _env_flag("ENABLE_EXPERIMENTAL_SOURCES")
+
+
+def require_experimental():
+    if not EXPERIMENTAL_SOURCES:
+        raise HTTPException(status_code=404, detail="This source is coming soon.")
+
+
+experimental = APIRouter(dependencies=[Depends(require_experimental)])
+
+
+# --- Visitor sessions ---
+
+SESSION_COOKIE = "rivyu_sid"
+SESSION_COOKIE_MAX_AGE = 7 * 24 * 3600
+
+
+class VisitorSessionMiddleware:
+    """Give every browser its own data session via an HttpOnly cookie.
+
+    Pure ASGI (not BaseHTTPMiddleware) so the context variable set here is
+    visible to endpoints, including sync ones run in the threadpool.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        headers = dict(scope.get("headers") or [])
+        cookie = SimpleCookie()
+        try:
+            cookie.load(headers.get(b"cookie", b"").decode("latin-1"))
+        except Exception:
+            pass
+        sid = cookie[SESSION_COOKIE].value if SESSION_COOKIE in cookie else ""
+        is_new = not is_valid_session_id(sid)
+        if is_new:
+            sid = secrets.token_hex(16)
+
+        forwarded = headers.get(b"x-forwarded-proto", b"").decode("latin-1")
+        secure = scope.get("scheme") == "https" or forwarded == "https"
+
+        async def send_with_cookie(message):
+            if is_new and message["type"] == "http.response.start":
+                value = f"{SESSION_COOKIE}={sid}; Path=/; Max-Age={SESSION_COOKIE_MAX_AGE}; HttpOnly; SameSite=Lax"
+                if secure:
+                    value += "; Secure"
+                message.setdefault("headers", []).append((b"set-cookie", value.encode("latin-1")))
+            await send(message)
+
+        token = set_session(sid)
+        try:
+            await self.app(scope, receive, send_with_cookie)
+        finally:
+            reset_session(token)
+
+
+# --- Google OAuth helpers (experimental Gmail connector) ---
+
 _google_oauth_states = {}  # state -> {"session_token": "...", "created_ts": float}
-_google_tokens = {}  # session_token -> {"access_token","refresh_token","expires_at","email"}
+_google_tokens = {}  # visitor session id -> {"access_token","refresh_token","expires_at","email"}
 GOOGLE_STATE_TTL_SEC = 15 * 60
-
-
-def verify_session(session_token: str = Cookie(None)):
-    """Dependency: require valid session cookie for protected routes."""
-    if not session_token or session_token not in _sessions:
-        raise HTTPException(status_code=401, detail="Not authenticated. Please login.")
-    return _sessions[session_token]
-
-
-def _ensure_session_token(request: Request):
-    """Ensure we have a session token for OAuth linking (guest allowed)."""
-    session_token = request.cookies.get("session_token")
-    if session_token and session_token in _sessions:
-        return session_token, False
-
-    session_token = secrets.token_hex(24)
-    _sessions[session_token] = "guest"
-    return session_token, True
 
 
 def _google_client_credentials():
@@ -181,10 +226,6 @@ def _merge_gmail_query(forward_alias: str, extra_query: str):
 
 # --- Pydantic models ---
 
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
 class PlayStoreRequest(BaseModel):
     app_id: str
     count: int = 100
@@ -253,58 +294,51 @@ MAX_ANALYZE_ITEMS = 220
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("🚀 Rivyu backend starting...")
-    restored = load_from_disk()
-    if restored:
-        print("💾 Restored store from disk")
+    removed = purge_expired_sessions()
+    if removed:
+        print(f"🧹 Removed {removed} expired session file(s)")
     yield
     print("👋 Rivyu backend shutting down")
 
-app = FastAPI(title="Rivyu", version="1.1.0", lifespan=lifespan)
+app = FastAPI(title="Rivyu", version="1.2.0", lifespan=lifespan)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(VisitorSessionMiddleware)
 
-
-# --- Auth endpoints ---
-
-@app.post("/api/login")
-async def login(req: LoginRequest, response: Response):
-    if req.username not in USERS or USERS[req.username] != req.password:
-        raise HTTPException(status_code=401, detail="Invalid username or password")
-    token = secrets.token_hex(24)
-    _sessions[token] = req.username
-    response.set_cookie(key="session_token", value=token, httponly=True, samesite="lax", max_age=86400)
-    return {"status": "ok", "username": req.username}
+# The frontend is served from the same origin, so CORS is off by default.
+# Set CORS_ORIGINS (comma-separated) to allow other front-ends.
+_cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type"],
+    )
 
 
-@app.post("/api/logout")
-async def logout(response: Response, session_token: str = Cookie(None)):
-    if session_token and session_token in _sessions:
-        del _sessions[session_token]
-    if session_token and session_token in _google_tokens:
-        del _google_tokens[session_token]
-    response.delete_cookie("session_token")
-    return {"status": "ok"}
+def capabilities():
+    """What this deployment can do (no secrets, just booleans)."""
+    gemini = bool(llm_client._get_api_key("GEMINI_API_KEY"))
+    openai = bool(llm_client._get_api_key("OPENAI_API_KEY"))
+    return {
+        "llm": "gemini" if gemini else "openai" if openai else "fallback",
+        "llm_providers": [name for name, on in (("gemini", gemini), ("openai", openai)) if on],
+        "reddit_api": reddit_api_configured(),
+        "experimental_sources": EXPERIMENTAL_SOURCES,
+    }
 
 
-@app.get("/api/me")
-async def me(user: str = Depends(verify_session)):
-    return {"username": user}
+# --- Experimental: Gmail OAuth ---
 
-
-@app.get("/api/auth/google/start")
+@experimental.get("/api/auth/google/start")
 async def google_oauth_start(request: Request):
     client_id, client_secret = _google_client_credentials()
     if not client_id or not client_secret:
         return RedirectResponse(url="/?gmail_oauth=error_config", status_code=302)
 
     _cleanup_google_states()
-    session_token, created_new = _ensure_session_token(request)
+    session_token = current_session_id()
     state = secrets.token_urlsafe(24)
     _google_oauth_states[state] = {
         "session_token": session_token,
@@ -326,13 +360,10 @@ async def google_oauth_start(request: Request):
         "state": state
     }
     url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
-    resp = RedirectResponse(url=url, status_code=302)
-    if created_new:
-        resp.set_cookie(key="session_token", value=session_token, httponly=True, samesite="lax", max_age=86400)
-    return resp
+    return RedirectResponse(url=url, status_code=302)
 
 
-@app.get("/api/auth/google/callback")
+@experimental.get("/api/auth/google/callback")
 async def google_oauth_callback(request: Request, code: str = "", state: str = "", error: str = ""):
     if error:
         return RedirectResponse(url="/?gmail_oauth=error", status_code=302)
@@ -390,14 +421,12 @@ async def google_oauth_callback(request: Request, code: str = "", state: str = "
     except Exception:
         return RedirectResponse(url="/?gmail_oauth=error", status_code=302)
 
-    resp = RedirectResponse(url="/?gmail_oauth=success", status_code=302)
-    resp.set_cookie(key="session_token", value=session_token, httponly=True, samesite="lax", max_age=86400)
-    return resp
+    return RedirectResponse(url="/?gmail_oauth=success", status_code=302)
 
 
-@app.get("/api/auth/google/status")
+@experimental.get("/api/auth/google/status")
 async def google_oauth_status(request: Request):
-    session_token = request.cookies.get("session_token")
+    session_token = current_session_id()
     token_info = _google_tokens.get(session_token or "", {})
     if not token_info:
         return {"connected": False}
@@ -407,9 +436,9 @@ async def google_oauth_status(request: Request):
     }
 
 
-@app.post("/api/auth/google/disconnect")
+@experimental.post("/api/auth/google/disconnect")
 async def google_oauth_disconnect(request: Request):
-    session_token = request.cookies.get("session_token")
+    session_token = current_session_id()
     if not session_token:
         return {"status": "ok", "connected": False}
 
@@ -430,6 +459,7 @@ async def google_oauth_disconnect(request: Request):
 
 @app.post("/api/ingest/playstore")
 def ingest_playstore(req: PlayStoreRequest):
+    _ensure_not_analyzing()
     app_id = _normalize_app_id(req.app_id)
     if not app_id:
         raise HTTPException(status_code=400, detail="Enter a Play Store app ID, e.g. com.whatsapp.")
@@ -453,6 +483,7 @@ def ingest_playstore(req: PlayStoreRequest):
 
 @app.post("/api/ingest/reddit")
 def ingest_reddit(req: RedditRequest):
+    _ensure_not_analyzing()
     subreddit = _normalize_subreddit(req.subreddit)
     if not subreddit:
         raise HTTPException(status_code=400, detail="Enter a subreddit name, e.g. whatsapp.")
@@ -462,12 +493,21 @@ def ingest_reddit(req: RedditRequest):
             detail=f"'{subreddit[:40]}' isn't a valid subreddit name. Use 2-21 letters, numbers or underscores."
         )
     safe_count = max(10, min(req.count, MAX_REDDIT_COUNT))
-    items = fetch_reddit_posts(subreddit, query=req.query.strip(), count=safe_count)
+    try:
+        items = fetch_reddit_posts(subreddit, query=req.query.strip(), count=safe_count)
+    except RedditAccessError as e:
+        print(f"❌ Reddit access error: {e}")
+        if reddit_api_configured():
+            detail = "Reddit refused the request. It may be rate-limiting; try again in a minute."
+        else:
+            detail = ("Reddit is blocking requests from this server. Reddit API credentials need to be "
+                      "configured (REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET). Try Google Play or CSV meanwhile.")
+        raise HTTPException(status_code=503, detail=detail)
     if not items:
         hint = " matching your search" if req.query.strip() else ""
         raise HTTPException(
             status_code=404,
-            detail=f"No posts{hint} found in r/{subreddit}. Check the subreddit exists and is public, or Reddit may be rate-limiting; try again in a minute."
+            detail=f"No posts{hint} found in r/{subreddit}. Check the subreddit exists and is public."
         )
     append_raw_items(items)
     add_source({"type": "reddit", "id": f"r/{subreddit}", "count": len(items)})
@@ -475,7 +515,7 @@ def ingest_reddit(req: RedditRequest):
     return {"status": "ok", "count": len(items), "source": "reddit", "total_raw": len(get_store()["raw_items"])}
 
 
-@app.post("/api/ingest/x")
+@experimental.post("/api/ingest/x")
 async def ingest_x(req: XRequest):
     if not (req.username or req.query):
         raise HTTPException(status_code=400, detail="Provide username or query for X ingestion.")
@@ -500,7 +540,7 @@ async def ingest_x(req: XRequest):
     return {"status": "ok", "count": len(items), "source": "x", "total_raw": len(get_store()["raw_items"])}
 
 
-@app.post("/api/ingest/x/mentions")
+@experimental.post("/api/ingest/x/mentions")
 async def ingest_x_mentions(req: XMentionsRequest):
     company_name = (req.company_name or "").strip()
     if not company_name:
@@ -531,7 +571,7 @@ async def ingest_x_mentions(req: XMentionsRequest):
     return {"status": "ok", "count": len(items), "source": "x", "total_raw": len(get_store()["raw_items"])}
 
 
-@app.post("/api/ingest/youtube")
+@experimental.post("/api/ingest/youtube")
 async def ingest_youtube(req: YouTubeRequest):
     safe_count = max(10, min(req.count, MAX_YOUTUBE_COUNT))
     items = fetch_youtube_comments(req.video_id, count=safe_count, api_key=req.api_key)
@@ -556,10 +596,10 @@ async def ingest_youtube(req: YouTubeRequest):
     }
 
 
-@app.post("/api/ingest/gmail")
+@experimental.post("/api/ingest/gmail")
 async def ingest_gmail(req: GmailRequest, request: Request):
     safe_count = max(10, min(req.count, MAX_GMAIL_COUNT))
-    session_token = request.cookies.get("session_token")
+    session_token = current_session_id()
     oauth_access_token = _get_valid_google_access_token(session_token or "")
 
     intake_email = (req.email or os.getenv("GMAIL_INTAKE_EMAIL", "")).strip()
@@ -626,6 +666,7 @@ async def ingest_gmail(req: GmailRequest, request: Request):
 
 @app.post("/api/ingest/csv")
 async def ingest_csv(file: UploadFile = File(...)):
+    _ensure_not_analyzing()
     filename = file.filename or "upload.csv"
     if not filename.lower().endswith((".csv", ".txt")):
         raise HTTPException(status_code=400, detail="Upload a .csv file.")
@@ -642,6 +683,7 @@ async def ingest_csv(file: UploadFile = File(...)):
 
 @app.post("/api/ingest/demo")
 def ingest_demo():
+    _ensure_not_analyzing()
     items = get_demo_items()
     clear_store()
     set_raw_items(items)
@@ -650,13 +692,32 @@ def ingest_demo():
     return {"status": "ok", "count": len(items), "source": "demo"}
 
 
-# --- Analysis endpoint ---
+# --- Analysis ---
 
-@app.post("/api/analyze")
-def analyze(req: AnalyzeRequest = AnalyzeRequest()):
+# Share of the progress bar each pipeline stage accounts for.
+STAGE_WEIGHTS = {"prepare": 5, "classify": 70, "themes": 10, "trends": 5, "alerts": 10}
+STAGE_ORDER = list(STAGE_WEIGHTS)
+
+_jobs = {}  # session id -> latest analysis job
+_jobs_lock = threading.Lock()
+JOB_RETENTION_SEC = 3600
+
+
+def _job_running(sid=None):
+    job = _jobs.get(sid or current_session_id())
+    return bool(job and job["status"] == "running")
+
+
+def _ensure_not_analyzing():
+    if _job_running():
+        raise HTTPException(status_code=409, detail="An analysis is running. Wait for it to finish, then try again.")
+
+
+def _analyze_current_session(use_demo=False, progress=None):
+    """Run the pipeline on the active session and store the results."""
     store = get_store()
 
-    if req.use_demo or not store["raw_items"]:
+    if use_demo or not store["raw_items"]:
         print("📦 Loading demo data for analysis...")
         items = get_demo_items()
         clear_store()
@@ -672,7 +733,7 @@ def analyze(req: AnalyzeRequest = AnalyzeRequest()):
 
     print(f"🔬 Running analysis on {len(analysis_input)} items...")
     try:
-        results = run_pipeline(analysis_input)
+        results = run_pipeline(analysis_input, progress=progress)
     except Exception as e:
         # Raw items stay loaded and no partial results are stored, so the
         # user can simply retry.
@@ -681,7 +742,8 @@ def analyze(req: AnalyzeRequest = AnalyzeRequest()):
     results["run_meta"] = {
         "analysis_id": f"run_{uuid.uuid4().hex[:10]}",
         "analyzed_at": datetime.now(timezone.utc).isoformat(),
-        "mode": "demo" if req.use_demo else "live"
+        "mode": "demo" if use_demo else "live",
+        "llm": capabilities()["llm"],
     }
     set_pipeline_results(results)
     save_to_disk()
@@ -694,6 +756,78 @@ def analyze(req: AnalyzeRequest = AnalyzeRequest()):
         "analyzed_count": len(analysis_input),
         "ingested_count": len(raw_items)
     }
+
+
+@app.post("/api/analyze")
+def analyze(req: AnalyzeRequest = AnalyzeRequest()):
+    """Run the analysis and wait for it (kept for API clients and scripts)."""
+    _ensure_not_analyzing()
+    return _analyze_current_session(use_demo=req.use_demo)
+
+
+def _public_job(job):
+    return {k: v for k, v in job.items() if not k.startswith("_")}
+
+
+def _run_job(sid, job, use_demo):
+    def on_progress(stage, fraction):
+        idx = STAGE_ORDER.index(stage) if stage in STAGE_ORDER else 0
+        done = sum(STAGE_WEIGHTS[s] for s in STAGE_ORDER[:idx])
+        job["stage"] = stage
+        job["stage_index"] = idx
+        job["percent"] = min(99, int(done + STAGE_WEIGHTS.get(stage, 0) * max(0.0, min(1.0, fraction))))
+
+    with use_session(sid):
+        try:
+            job["result"] = _analyze_current_session(use_demo=use_demo, progress=on_progress)
+            job["percent"] = 100
+            job["status"] = "done"
+        except HTTPException as e:
+            job["error"] = e.detail
+            job["status"] = "error"
+        except Exception as e:
+            print(f"❌ Analysis job failed: {e}")
+            job["error"] = "Analysis failed unexpectedly. Your data is still loaded; try again."
+            job["status"] = "error"
+        finally:
+            job["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+
+@app.post("/api/analyze/start", status_code=202)
+def analyze_start(req: AnalyzeRequest = AnalyzeRequest()):
+    """Start the analysis in the background; poll /api/analyze/progress."""
+    sid = current_session_id()
+    now = datetime.now(timezone.utc).timestamp()
+    with _jobs_lock:
+        existing = _jobs.get(sid)
+        if existing and existing["status"] == "running":
+            return _public_job(existing)
+        for key in [k for k, j in _jobs.items() if j["status"] != "running" and now - j["_created"] > JOB_RETENTION_SEC]:
+            _jobs.pop(key, None)
+        job = {
+            "id": f"job_{uuid.uuid4().hex[:10]}",
+            "status": "running",
+            "stage": "prepare",
+            "stage_index": 0,
+            "stages": STAGE_ORDER,
+            "percent": 0,
+            "result": None,
+            "error": None,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": None,
+            "_created": now,
+        }
+        _jobs[sid] = job
+    threading.Thread(target=_run_job, args=(sid, job, req.use_demo), daemon=True).start()
+    return _public_job(job)
+
+
+@app.get("/api/analyze/progress")
+def analyze_progress():
+    job = _jobs.get(current_session_id())
+    if not job:
+        return JSONResponse({"status": "idle"}, headers={"Cache-Control": "no-store"})
+    return JSONResponse(_public_job(job), headers={"Cache-Control": "no-store"})
 
 
 # --- Dashboard endpoint ---
@@ -763,7 +897,8 @@ async def theme_detail(theme_id: str):
     theme = get_theme_by_id(theme_id)
     if not theme:
         raise HTTPException(status_code=404, detail=f"Theme '{theme_id}' not found.")
-    return theme
+    alert = next((a for a in get_store()["alerts"] if a.get("theme_id") == theme_id), None)
+    return {**theme, "alert": alert}
 
 
 # --- Store status ---
@@ -781,16 +916,20 @@ async def status():
         "state": session_state(),
         "analyzed_at": (store.get("run_meta") or {}).get("analyzed_at", ""),
         "analyze_limit": MAX_ANALYZE_ITEMS,
+        "analyzing": _job_running(),
+        "capabilities": capabilities(),
     }, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "version": app.version}
+    caps = capabilities()
+    return {"status": "ok", "version": app.version, "llm": caps["llm"], "reddit_api": caps["reddit_api"]}
 
 
 @app.post("/api/reset")
 async def reset():
+    _ensure_not_analyzing()
     clear_store()
     save_to_disk()
     return {"status": "ok", "message": "Store cleared"}
@@ -833,6 +972,9 @@ async def export_complaints():
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=complaints.csv", "Cache-Control": "no-store"}
     )
+
+
+app.include_router(experimental)
 
 
 # --- Serve frontend ---

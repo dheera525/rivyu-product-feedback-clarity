@@ -1,31 +1,96 @@
 """
-In-memory data store with optional JSON file persistence.
-Single source of truth for all pipeline data.
+Per-session data store with JSON file persistence.
+
+Every visitor gets their own session (identified by a cookie, see
+backend/main.py). The active session is carried in a context variable, so
+callers just use get_store() and friends without passing an id around.
+Sessions live in memory (LRU-capped) and are persisted one file per
+session under data/sessions/, which are purged after SESSION_TTL_HOURS.
 """
 
+import contextvars
 import json
 import os
+import re
 import threading
+import time
+from collections import OrderedDict
+from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
-STORE_FILE = os.path.join(DATA_DIR, "store.json")
 
-_lock = threading.Lock()
+DEFAULT_SESSION = "local"
+MAX_SESSIONS_IN_MEMORY = 200
+SESSION_TTL_HOURS = 48
+_SID_RE = re.compile(r"^[a-z0-9]{1,64}$")
 
-_store = {
-    "raw_items": [],
-    "processed_items": [],
-    "themes": [],
-    "alerts": [],
-    "stats": {},
-    "sources_connected": [],
-    "run_meta": {
-        "analysis_id": "",
-        "analyzed_at": "",
-        "mode": ""
+_lock = threading.RLock()
+_sessions = OrderedDict()  # sid -> store dict
+_current_sid = contextvars.ContextVar("rivyu_session", default=DEFAULT_SESSION)
+
+
+def _empty_store():
+    return {
+        "raw_items": [],
+        "processed_items": [],
+        "themes": [],
+        "alerts": [],
+        "stats": {},
+        "sources_connected": [],
+        "run_meta": {"analysis_id": "", "analyzed_at": "", "mode": ""},
     }
-}
+
+
+def is_valid_session_id(sid):
+    return bool(sid) and bool(_SID_RE.match(sid))
+
+
+def current_session_id():
+    return _current_sid.get()
+
+
+def set_session(sid):
+    """Make `sid` the active session for this context. Returns a reset token."""
+    if not is_valid_session_id(sid):
+        raise ValueError("invalid session id")
+    return _current_sid.set(sid)
+
+
+def reset_session(token):
+    _current_sid.reset(token)
+
+
+@contextmanager
+def use_session(sid):
+    token = set_session(sid)
+    try:
+        yield
+    finally:
+        reset_session(token)
+
+
+def sessions_dir():
+    return os.path.join(DATA_DIR, "sessions")
+
+
+def session_file(sid=None):
+    return os.path.join(sessions_dir(), f"{sid or current_session_id()}.json")
+
+
+def _s():
+    """The store dict for the active session (loaded from disk if needed)."""
+    sid = current_session_id()
+    with _lock:
+        store = _sessions.get(sid)
+        if store is None:
+            store = _read_session_file(sid) or _empty_store()
+            _sessions[sid] = store
+            while len(_sessions) > MAX_SESSIONS_IN_MEMORY:
+                _sessions.popitem(last=False)  # evict least recently used (file stays)
+        else:
+            _sessions.move_to_end(sid)
+        return store
 
 
 # Evidence rows sent to the dashboard (searched and filtered client-side).
@@ -72,47 +137,47 @@ def _ensure_data_dir():
 
 
 def get_store():
-    return _store
+    return _s()
 
 
 def set_raw_items(items):
     with _lock:
         # Replacing raw input invalidates all derived analysis state.
-        _store["raw_items"] = items
-        _store["processed_items"] = []
-        _store["themes"] = []
-        _store["alerts"] = []
-        _store["stats"] = {}
-        _store["run_meta"] = {"analysis_id": "", "analyzed_at": "", "mode": ""}
+        _s()["raw_items"] = items
+        _s()["processed_items"] = []
+        _s()["themes"] = []
+        _s()["alerts"] = []
+        _s()["stats"] = {}
+        _s()["run_meta"] = {"analysis_id": "", "analyzed_at": "", "mode": ""}
 
 
 def append_raw_items(items):
     with _lock:
         # Merge by id to avoid duplicate ingestion when same source is fetched repeatedly.
-        existing_ids = {str(item.get("id", "")) for item in _store["raw_items"]}
+        existing_ids = {str(item.get("id", "")) for item in _s()["raw_items"]}
         for item in items:
             item_id = str(item.get("id", ""))
             if item_id and item_id in existing_ids:
                 continue
-            _store["raw_items"].append(item)
+            _s()["raw_items"].append(item)
             if item_id:
                 existing_ids.add(item_id)
         # Any raw mutation invalidates derived state.
-        _store["processed_items"] = []
-        _store["themes"] = []
-        _store["alerts"] = []
-        _store["stats"] = {}
-        _store["run_meta"] = {"analysis_id": "", "analyzed_at": "", "mode": ""}
+        _s()["processed_items"] = []
+        _s()["themes"] = []
+        _s()["alerts"] = []
+        _s()["stats"] = {}
+        _s()["run_meta"] = {"analysis_id": "", "analyzed_at": "", "mode": ""}
 
 
 def set_pipeline_results(results):
     """Store results from run_pipeline()."""
     with _lock:
-        _store["processed_items"] = results.get("processed_items", [])
-        _store["themes"] = results.get("themes", [])
-        _store["alerts"] = results.get("alerts", [])
-        _store["stats"] = results.get("stats", {})
-        _store["run_meta"] = results.get("run_meta", _store.get("run_meta", {}))
+        _s()["processed_items"] = results.get("processed_items", [])
+        _s()["themes"] = results.get("themes", [])
+        _s()["alerts"] = results.get("alerts", [])
+        _s()["stats"] = results.get("stats", {})
+        _s()["run_meta"] = results.get("run_meta", _s().get("run_meta", {}))
 
 
 def _parse_date(date_str):
@@ -172,12 +237,12 @@ def _time_window_counts(items):
 
 def get_dashboard_data(time_filter="all"):
     """Return dashboard-ready data, optionally filtered by time window."""
-    processed = _store["processed_items"]
+    processed = _s()["processed_items"]
     filtered = _filter_items_by_time(processed, time_filter)
 
     themes_summary = []
     theme_map = {}
-    for t in _store["themes"]:
+    for t in _s()["themes"]:
         # Filter theme items by time too
         theme_items = t.get("items", [])
         theme_filtered = _filter_items_by_time(theme_items, time_filter)
@@ -224,7 +289,7 @@ def get_dashboard_data(time_filter="all"):
             complaint_count += 1
 
     enriched_alerts = []
-    for a in _store["alerts"]:
+    for a in _s()["alerts"]:
         theme = theme_map.get(a.get("theme_id", ""))
         theme_items = theme.get("items", []) if theme else []
         enriched = dict(a)
@@ -232,9 +297,9 @@ def get_dashboard_data(time_filter="all"):
         enriched_alerts.append(enriched)
 
     return {
-        "has_results": bool(_store.get("stats")),
+        "has_results": bool(_s().get("stats")),
         "stats": {
-            **_store.get("stats", {}),
+            **_s().get("stats", {}),
             "filtered_items": len(filtered),
             "time_filter": time_filter,
             "window_counts": _time_window_counts(processed),
@@ -242,15 +307,15 @@ def get_dashboard_data(time_filter="all"):
         },
         "alerts": enriched_alerts,
         "themes": themes_summary,
-        "sources_connected": _store["sources_connected"],
+        "sources_connected": _s()["sources_connected"],
         "recent_items": filtered[:RECENT_ITEMS_LIMIT],
-        "run_meta": _store.get("run_meta", {}),
+        "run_meta": _s().get("run_meta", {}),
         "source_breakdown": source_breakdown
     }
 
 
 def get_theme_by_id(theme_id):
-    for t in _store["themes"]:
+    for t in _s()["themes"]:
         if t.get("theme_id") == theme_id:
             return t
     return None
@@ -262,23 +327,23 @@ def add_source(source_info):
         src_id = source_info.get("id")
         src_count = int(source_info.get("count", 0) or 0)
 
-        for existing in _store["sources_connected"]:
+        for existing in _s()["sources_connected"]:
             if existing.get("type") == src_type and existing.get("id") == src_id:
                 existing["count"] = int(existing.get("count", 0) or 0) + src_count
                 return
 
-        _store["sources_connected"].append(source_info)
+        _s()["sources_connected"].append(source_info)
 
 
 def clear_store():
     with _lock:
-        _store["raw_items"] = []
-        _store["processed_items"] = []
-        _store["themes"] = []
-        _store["alerts"] = []
-        _store["stats"] = {}
-        _store["sources_connected"] = []
-        _store["run_meta"] = {"analysis_id": "", "analyzed_at": "", "mode": ""}
+        _s()["raw_items"] = []
+        _s()["processed_items"] = []
+        _s()["themes"] = []
+        _s()["alerts"] = []
+        _s()["stats"] = {}
+        _s()["sources_connected"] = []
+        _s()["run_meta"] = {"analysis_id": "", "analyzed_at": "", "mode": ""}
 
 
 def _is_consistent(data):
@@ -306,51 +371,83 @@ def session_state():
     Returns one of: "empty" (nothing loaded), "ingested" (raw data loaded,
     not analyzed yet), "analyzed" (results available).
     """
-    if _store.get("stats") and _store.get("processed_items"):
+    if _s().get("stats") and _s().get("processed_items"):
         return "analyzed"
-    if _store.get("raw_items"):
+    if _s().get("raw_items"):
         return "ingested"
     return "empty"
 
 
-def save_to_disk():
-    """Persist the store atomically so a crash mid-write can't corrupt it."""
+def _read_session_file(sid):
+    path = session_file(sid)
+    if not os.path.exists(path):
+        return None
     try:
-        _ensure_data_dir()
-        tmp_path = STORE_FILE + ".tmp"
-        with _lock:
-            with open(tmp_path, "w") as f:
-                json.dump(_store, f, default=str)
-            os.replace(tmp_path, STORE_FILE)
-    except OSError as e:
-        # Persistence is best-effort; the in-memory store stays authoritative.
-        print(f"⚠️  Failed to save store to disk: {e}")
-
-
-def load_from_disk():
-    if not os.path.exists(STORE_FILE):
-        return False
-    try:
-        with open(STORE_FILE, "r") as f:
+        with open(path, "r") as f:
             data = json.load(f)
         if not isinstance(data, dict):
             raise ValueError("store file is not a JSON object")
-        if not _is_consistent(data):
-            print("⚠️  Stored analysis was incomplete; keeping raw items and dropping partial results.")
-            _drop_derived(data)
-        with _lock:
-            _store["raw_items"] = data.get("raw_items", [])
-            _store["processed_items"] = data.get("processed_items", [])
-            _store["themes"] = data.get("themes", [])
-            _store["alerts"] = data.get("alerts", [])
-            _store["stats"] = data.get("stats", {})
-            _store["sources_connected"] = data.get("sources_connected", [])
-            _store["run_meta"] = data.get(
-                "run_meta",
-                {"analysis_id": "", "analyzed_at": "", "mode": ""}
-            )
-        return True
     except Exception as e:
-        print(f"⚠️  Failed to load store from disk, starting empty: {e}")
-        clear_store()
-        return False
+        print(f"⚠️  Failed to load session {sid}, starting empty: {e}")
+        return None
+    store = _empty_store()
+    for key in store:
+        if key in data:
+            store[key] = data[key]
+    if not _is_consistent(store):
+        print(f"⚠️  Session {sid} had an incomplete analysis; keeping raw items only.")
+        _drop_derived(store)
+    return store
+
+
+def save_to_disk():
+    """Persist the active session atomically (or delete its file if empty)."""
+    path = session_file()
+    try:
+        os.makedirs(sessions_dir(), exist_ok=True)
+        with _lock:
+            store = _s()
+            if not store["raw_items"] and not store["sources_connected"]:
+                if os.path.exists(path):
+                    os.remove(path)
+                return
+            tmp_path = f"{path}.{threading.get_ident()}.tmp"
+            with open(tmp_path, "w") as f:
+                json.dump(store, f, default=str)
+            os.replace(tmp_path, path)
+    except OSError as e:
+        # Persistence is best-effort; the in-memory store stays authoritative.
+        print(f"⚠️  Failed to save session to disk: {e}")
+
+
+def load_from_disk():
+    """Reload the active session from disk. Returns True if a file was loaded."""
+    sid = current_session_id()
+    store = _read_session_file(sid)
+    with _lock:
+        _sessions[sid] = store or _empty_store()
+    return store is not None
+
+
+def purge_expired_sessions(max_age_hours=SESSION_TTL_HOURS):
+    """Delete session files untouched for longer than max_age_hours."""
+    directory = sessions_dir()
+    if not os.path.isdir(directory):
+        return 0
+    cutoff = time.time() - max_age_hours * 3600
+    removed = 0
+    for name in os.listdir(directory):
+        path = os.path.join(directory, name)
+        try:
+            if os.path.getmtime(path) < cutoff:
+                os.remove(path)
+                removed += 1
+        except OSError:
+            pass
+    return removed
+
+
+def reset_all_sessions():
+    """Forget every in-memory session (used by tests)."""
+    with _lock:
+        _sessions.clear()

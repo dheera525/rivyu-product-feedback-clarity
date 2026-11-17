@@ -6,7 +6,24 @@ from trend import detect_trends
 from alerts import generate_alerts
 
 
-def run_pipeline(raw_items):
+# Stage ids reported to the progress callback, in order.
+STAGES = ["prepare", "classify", "themes", "trends", "alerts"]
+
+
+def run_pipeline(raw_items, progress=None):
+    """Run the full analysis.
+
+    `progress(stage, fraction)` is called as work happens: `stage` is one of
+    STAGES and `fraction` (0..1) is progress within that stage.
+    """
+    def report(stage, fraction=0.0):
+        if progress:
+            try:
+                progress(stage, fraction)
+            except Exception:
+                pass  # progress reporting must never break the analysis
+
+    report("prepare")
     if not raw_items:
         print("⚠️  run_pipeline called with empty input")
         return {
@@ -19,10 +36,12 @@ def run_pipeline(raw_items):
     print(f"🚀 Pipeline starting with {len(raw_items)} items...")
 
     # Step 1: Classify (includes dynamic bucket assignment)
-    processed_items = classify_items(raw_items)
+    report("classify")
+    processed_items = classify_items(raw_items, on_batch=lambda done, total: report("classify", done / max(total, 1)))
     print(f"📋 Classification done: {len(processed_items)} items processed")
 
     # Step 2: Group into themes (uses core_bucket + dynamic_bucket)
+    report("themes")
     try:
         themes = group_into_themes(processed_items)
         print(f"📦 Grouping done: {len(themes)} themes found")
@@ -31,6 +50,7 @@ def run_pipeline(raw_items):
         themes = []
 
     # Step 3: Detect trends
+    report("trends")
     try:
         themes = detect_trends(themes)
         print(f"📈 Trend detection done")
@@ -38,6 +58,7 @@ def run_pipeline(raw_items):
         print(f"❌ Trend detection failed: {e}")
 
     # Step 4: Generate alerts (uses core_bucket + risk_tag)
+    report("alerts")
     try:
         alerts = generate_alerts(themes)
         print(f"🔔 Alert generation done: {len(alerts)} alerts raised")
