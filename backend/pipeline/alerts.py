@@ -194,15 +194,16 @@ def build_title(theme, alert_type):
     }.get(risk_tag, "")
 
     if alert_type == "critical":
-        return f"🚨 {label} — {risk_label or 'critical spike'} (+{trend_pct}%)"
+        trend_note = f" (+{trend_pct:g}%)" if isinstance(trend_pct, (int, float)) and trend_pct > 0 else ""
+        return f"{label} — {risk_label or 'critical spike'}{trend_note}"
     elif alert_type == "rising":
-        return f"⚠️ {label} — {risk_label or 'rising complaints'}"
+        return f"{label} — {risk_label or 'rising complaints'}"
     elif alert_type == "feature_demand":
-        return f"📢 Growing demand: {label}"
+        return f"Growing demand: {label}"
     elif alert_type == "recurring":
-        return f"🔁 {label} — recurring {risk_label or 'issue'}"
+        return f"{label} — recurring {(risk_label or 'issue').lower()}"
     elif alert_type == "watch":
-        return f"👁️ Watch: {label}"
+        return f"Watch: {label}"
     else:
         return f"Alert: {label}"
 

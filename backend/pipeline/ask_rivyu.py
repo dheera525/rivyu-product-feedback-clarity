@@ -80,48 +80,7 @@ USER QUESTION:
 {question}"""
 
     def deterministic_answer():
-        q = question.lower()
-        top = top_themes[:5]
-        rising = [t for t in top_themes if t.get("trend") in {"new", "rising", "spiking"}]
-        critical = [a for a in alerts if a.get("severity") in {"critical", "high"}]
-        urgent = [i for i in processed_items if int(i.get("urgency", 3) or 3) >= 4]
-
-        if "new" in q or "recent" in q or "last" in q:
-            focus = rising[:3] if rising else top[:3]
-            lines = []
-            for t in focus:
-                risk = t.get("risk_tag", "none")
-                risk_label = f" [{risk}]" if risk != "none" else ""
-                lines.append(f"- **{t.get('label', 'Theme')}**: {t.get('count', 0)} mentions, "
-                             f"trend {t.get('trend', 'stable')} ({t.get('trend_pct', 0)}%){risk_label}")
-            return (
-                "## Summary\nNewest issue signals from current analysis:\n\n"
-                + ("\n".join(lines) if lines else "- No clear new/rising signal detected.\n")
-                + f"\n\n## Recommended Actions\n"
-                + f"- Review {len(critical)} high/critical alerts first\n"
-                + f"- Triage {len(urgent)} high-urgency items for immediate fixes"
-            )
-
-        lines = []
-        for t in top[:3]:
-            risk = t.get("risk_tag", "none")
-            risk_label = f" [{risk}]" if risk != "none" else ""
-            lines.append(f"- **{t.get('label', 'Theme')}**: {t.get('count', 0)} mentions, "
-                         f"urgency {t.get('avg_urgency', 0)}/5, "
-                         f"trend {t.get('trend', 'stable')}{risk_label}")
-
-        alert_lines = []
-        for a in critical[:3]:
-            alert_lines.append(f"- {a.get('title', 'Alert')}: risk score {a.get('risk_score', 0)}")
-
-        return (
-            "## Summary\nTop issues from current dataset:\n\n"
-            + ("\n".join(lines) if lines else "- No strong issue clusters detected.\n")
-            + (f"\n\n## Key Risks\n" + "\n".join(alert_lines) if alert_lines else "")
-            + f"\n\n## Recommended Actions\n"
-            + f"- Address themes behind {len(critical)} high/critical alerts first\n"
-            + f"- Review top {min(10, len(urgent))} urgent comments and assign owners"
-        )
+        return build_fallback_answer(question, themes, alerts, processed_items)
 
     try:
         answer = call_llm(prompt)
@@ -132,6 +91,121 @@ USER QUESTION:
         print(f"❌ ask_rivyu failed: {e}")
         # Keep demo UX stable: always provide a useful fallback.
         return deterministic_answer()
+
+
+RISK_LABELS = {
+    "revenue_risk": "revenue risk",
+    "churn_risk": "churn risk",
+    "stability_risk": "stability risk",
+    "trust_risk": "trust risk",
+    "ux_risk": "UX risk",
+    "support_risk": "support risk",
+    "retention_risk": "retention risk",
+}
+
+REVENUE_BUCKETS = {"Payments, Refunds & Billing", "Trust, Fraud & Policy Complaints"}
+
+
+def _risk_note(tag):
+    label = RISK_LABELS.get(tag)
+    return f" ({label})" if label else ""
+
+
+def _theme_line(t, detail="urgency"):
+    n = t.get("count", 0)
+    base = f"- **{t.get('label', 'Theme')}**: {n} mention{'' if n == 1 else 's'}"
+    if detail == "trend":
+        base += f", trend {t.get('trend', 'stable')} ({t.get('trend_pct', 0):+g}%)"
+    elif detail == "sentiment":
+        base += f", avg sentiment {t.get('avg_sentiment', 0):+.2f}"
+    else:
+        base += f", urgency {t.get('avg_urgency', 0)}/5, trend {t.get('trend', 'stable')}"
+    return base + _risk_note(t.get("risk_tag"))
+
+
+def _quote(item, max_len=140):
+    text = (item.get("text") or item.get("summary") or "").strip().replace("\n", " ")
+    if len(text) > max_len:
+        text = text[: max_len - 1].rstrip() + "…"
+    return f'- "{text}"'
+
+
+def build_fallback_answer(question, themes, alerts, processed_items):
+    """Answer from the analysis results alone, without an LLM.
+
+    Used when no LLM key is configured or every provider fails. Picks an
+    answer shape from keywords in the question so common questions still get
+    a specific, data-backed reply.
+    """
+    q = (question or "").lower()
+    primary = [t for t in themes if not t.get("parent_theme_id")] or list(themes)
+    by_count = sorted(primary, key=lambda t: t.get("count", 0), reverse=True)
+    critical = [a for a in alerts if a.get("severity") in {"critical", "high"}]
+    urgent = [i for i in processed_items if int(i.get("urgency", 3) or 3) >= 4]
+    note = "\n\n*Generated from the analysis results without an LLM.*"
+
+    def has(*words):
+        return any(w in q for w in words)
+
+    if has("revenue", "billing", "payment", "refund", "money", "charge", "pricing", "subscription"):
+        money_themes = [t for t in primary if t.get("risk_tag") == "revenue_risk" or t.get("core_bucket") in REVENUE_BUCKETS]
+        money_alerts = [a for a in alerts if a.get("risk_tag") == "revenue_risk" or a.get("core_bucket") in REVENUE_BUCKETS]
+        if not money_themes:
+            return "## Summary\nNo billing, payment or other revenue-risk feedback was found in this dataset." + note
+        samples = [i for i in processed_items if i.get("risk_tag") == "revenue_risk"][:3]
+        out = "## Summary\nRevenue-related feedback found in this dataset:\n\n" + "\n".join(_theme_line(t) for t in money_themes)
+        if money_alerts:
+            out += "\n\n## Key Risks\n" + "\n".join(f"- {a.get('title')} (severity {a.get('severity')}, risk score {a.get('risk_score', 0)})" for a in money_alerts)
+        if samples:
+            out += "\n\n## What customers say\n" + "\n".join(_quote(i) for i in samples)
+        action = money_alerts[0].get("suggested_action") if money_alerts else "Review the billing flow and respond to affected customers."
+        return out + f"\n\n## Recommended Actions\n- {action}" + note
+
+    if has("prais", "love", "like", "positive", "happy", "good", "working well"):
+        positive = [i for i in processed_items if float(i.get("sentiment", 0) or 0) >= 0.3]
+        pos_themes = sorted([t for t in primary if float(t.get("avg_sentiment", 0) or 0) >= 0.25], key=lambda t: t.get("count", 0), reverse=True)
+        if not positive:
+            return "## Summary\nThere's very little positive feedback in this dataset; it's dominated by complaints." + note
+        out = f"## Summary\n{len(positive)} of {len(processed_items)} items are positive."
+        if pos_themes:
+            out += "\n\n" + "\n".join(_theme_line(t, "sentiment") for t in pos_themes[:3])
+        out += "\n\n## What customers say\n" + "\n".join(_quote(i) for i in positive[:3])
+        return out + note
+
+    if has("new", "recent", "last", "week", "today", "trend", "rising", "emerging", "changing"):
+        rising = [t for t in primary if t.get("trend") in {"new", "rising", "spiking"}]
+        focus = rising[:3] or by_count[:3]
+        heading = "Rising or newly appearing themes:" if rising else "Nothing is rising sharply; the largest themes are steady:"
+        return (
+            f"## Summary\n{heading}\n\n" + "\n".join(_theme_line(t, "trend") for t in focus)
+            + "\n\n## Recommended Actions\n"
+            + f"- Review the {len(critical)} high/critical alerts first\n"
+            + f"- Triage the {len(urgent)} high-urgency items"
+            + note
+        )
+
+    if has("priorit", "sprint", "focus", "first", "fix", "roadmap", "should we"):
+        if not alerts:
+            return "## Summary\nNo theme crossed the alert threshold. Start with the largest themes:\n\n" + "\n".join(_theme_line(t) for t in by_count[:3]) + note
+        lines = [f"{n}. **{a.get('title')}**: {a.get('suggested_action', '')}" for n, a in enumerate(alerts[:3], start=1)]
+        return (
+            "## Summary\nSuggested order for this sprint, ranked by severity and risk score:\n\n" + "\n".join(lines)
+            + f"\n\n## Why\n- {len(critical)} alerts are high or critical\n- {len(urgent)} items are rated urgency 4 or 5"
+            + note
+        )
+
+    # Default: top issues.
+    lines = [_theme_line(t) for t in by_count[:3]]
+    alert_lines = [f"- {a.get('title', 'Alert')}: risk score {a.get('risk_score', 0)}" for a in critical[:3]]
+    return (
+        "## Summary\nTop issues in this dataset:\n\n"
+        + ("\n".join(lines) if lines else "- No clear issue clusters detected.")
+        + ("\n\n## Key Risks\n" + "\n".join(alert_lines) if alert_lines else "")
+        + "\n\n## Recommended Actions\n"
+        + f"- Address the themes behind {len(critical)} high/critical alerts first\n"
+        + f"- Review the top {min(10, len(urgent))} urgent items and assign owners"
+        + note
+    )
 
 
 if __name__ == "__main__":

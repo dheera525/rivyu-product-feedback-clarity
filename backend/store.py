@@ -28,6 +28,9 @@ _store = {
 }
 
 
+# Evidence rows sent to the dashboard (searched and filtered client-side).
+RECENT_ITEMS_LIMIT = 150
+
 RISK_PRIORITY = {
     "critical": 4,
     "high": 3,
@@ -240,7 +243,7 @@ def get_dashboard_data(time_filter="all"):
         "alerts": enriched_alerts,
         "themes": themes_summary,
         "sources_connected": _store["sources_connected"],
-        "recent_items": filtered[:20],
+        "recent_items": filtered[:RECENT_ITEMS_LIMIT],
         "run_meta": _store.get("run_meta", {}),
         "source_breakdown": source_breakdown
     }
@@ -278,11 +281,50 @@ def clear_store():
         _store["run_meta"] = {"analysis_id": "", "analyzed_at": "", "mode": ""}
 
 
+def _is_consistent(data):
+    """Analysis results are only valid if all derived parts exist together."""
+    has_stats = bool(data.get("stats"))
+    has_processed = bool(data.get("processed_items"))
+    if has_stats != has_processed:
+        return False
+    if has_processed and not data.get("raw_items"):
+        return False
+    return True
+
+
+def _drop_derived(data):
+    data["processed_items"] = []
+    data["themes"] = []
+    data["alerts"] = []
+    data["stats"] = {}
+    data["run_meta"] = {"analysis_id": "", "analyzed_at": "", "mode": ""}
+
+
+def session_state():
+    """Single source of truth for what the UI should say about the session.
+
+    Returns one of: "empty" (nothing loaded), "ingested" (raw data loaded,
+    not analyzed yet), "analyzed" (results available).
+    """
+    if _store.get("stats") and _store.get("processed_items"):
+        return "analyzed"
+    if _store.get("raw_items"):
+        return "ingested"
+    return "empty"
+
+
 def save_to_disk():
-    _ensure_data_dir()
-    with _lock:
-        with open(STORE_FILE, "w") as f:
-            json.dump(_store, f, indent=2, default=str)
+    """Persist the store atomically so a crash mid-write can't corrupt it."""
+    try:
+        _ensure_data_dir()
+        tmp_path = STORE_FILE + ".tmp"
+        with _lock:
+            with open(tmp_path, "w") as f:
+                json.dump(_store, f, default=str)
+            os.replace(tmp_path, STORE_FILE)
+    except OSError as e:
+        # Persistence is best-effort; the in-memory store stays authoritative.
+        print(f"⚠️  Failed to save store to disk: {e}")
 
 
 def load_from_disk():
@@ -291,6 +333,11 @@ def load_from_disk():
     try:
         with open(STORE_FILE, "r") as f:
             data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError("store file is not a JSON object")
+        if not _is_consistent(data):
+            print("⚠️  Stored analysis was incomplete; keeping raw items and dropping partial results.")
+            _drop_derived(data)
         with _lock:
             _store["raw_items"] = data.get("raw_items", [])
             _store["processed_items"] = data.get("processed_items", [])
@@ -304,5 +351,6 @@ def load_from_disk():
             )
         return True
     except Exception as e:
-        print(f"⚠️  Failed to load store from disk: {e}")
+        print(f"⚠️  Failed to load store from disk, starting empty: {e}")
+        clear_store()
         return False

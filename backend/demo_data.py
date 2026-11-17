@@ -43,7 +43,24 @@ DEMO_ITEMS = [
 ]
 
 
-def get_demo_items():
-    """Return a copy of the demo dataset."""
+def get_demo_items(now=None):
+    """Return a copy of the demo dataset with dates shifted to be recent.
+
+    The dataset spans ~25 days. Dates are moved forward so the newest item
+    lands a few hours before `now`, which keeps the 24h / 7d dashboard views
+    and trend detection meaningful whenever the demo is loaded.
+    """
     import copy
-    return copy.deepcopy(DEMO_ITEMS)
+    from datetime import datetime, timedelta, timezone
+
+    items = copy.deepcopy(DEMO_ITEMS)
+    now = now or datetime.now(timezone.utc)
+
+    def parse(d):
+        return datetime.fromisoformat(d.replace("Z", "+00:00"))
+
+    newest = max(parse(i["date"]) for i in items)
+    shift = (now - timedelta(hours=3)) - newest
+    for item in items:
+        item["date"] = (parse(item["date"]) + shift).isoformat().replace("+00:00", "Z")
+    return items

@@ -31,11 +31,12 @@ from pydantic import BaseModel
 
 from backend.store import (
     get_store, append_raw_items, set_raw_items, set_pipeline_results,
-    get_dashboard_data, get_theme_by_id, add_source, clear_store, save_to_disk, load_from_disk
+    get_dashboard_data, get_theme_by_id, add_source, clear_store, save_to_disk, load_from_disk,
+    session_state
 )
 from backend.ingest.playstore import fetch_playstore_reviews
-from backend.ingest.reddit import fetch_reddit_posts
-from backend.ingest.csv_upload import parse_csv_feedback
+from backend.ingest.reddit import fetch_reddit_posts, _normalize_subreddit
+from backend.ingest.csv_upload import parse_csv_feedback, CSVFormatError
 from backend.ingest.x_posts import fetch_x_posts
 from backend.ingest.youtube_comments import fetch_youtube_comments
 from backend.ingest.gmail import fetch_gmail_messages, fetch_gmail_messages_oauth
@@ -225,6 +226,19 @@ class AskRequest(BaseModel):
 class AnalyzeRequest(BaseModel):
     use_demo: bool = False
 
+# Input validation (Play Store package names and subreddit names).
+APP_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$")
+SUBREDDIT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_]{1,20}$")
+PLAY_URL_ID_RE = re.compile(r"[?&]id=([A-Za-z0-9_.]+)")
+
+
+def _normalize_app_id(raw: str) -> str:
+    """Accept a bare package name or a full Play Store URL."""
+    value = (raw or "").strip()
+    m = PLAY_URL_ID_RE.search(value)
+    return m.group(1) if m else value
+
+
 # Runtime caps (raised for realistic demos while keeping latency bounded).
 MAX_PLAYSTORE_COUNT = 300
 MAX_REDDIT_COUNT = 300
@@ -245,7 +259,7 @@ async def lifespan(app: FastAPI):
     yield
     print("👋 Rivyu backend shutting down")
 
-app = FastAPI(title="Rivyu", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Rivyu", version="1.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -415,25 +429,48 @@ async def google_oauth_disconnect(request: Request):
 # --- Ingestion endpoints (protected) ---
 
 @app.post("/api/ingest/playstore")
-async def ingest_playstore(req: PlayStoreRequest):
+def ingest_playstore(req: PlayStoreRequest):
+    app_id = _normalize_app_id(req.app_id)
+    if not app_id:
+        raise HTTPException(status_code=400, detail="Enter a Play Store app ID, e.g. com.whatsapp.")
+    if not APP_ID_RE.match(app_id):
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{app_id[:60]}' isn't a valid app ID. It should look like com.company.app (find it in the Play Store URL after id=)."
+        )
     safe_count = max(10, min(req.count, MAX_PLAYSTORE_COUNT))
-    items = fetch_playstore_reviews(req.app_id, count=safe_count)
+    items = fetch_playstore_reviews(app_id, count=safe_count)
     if not items:
-        raise HTTPException(status_code=400, detail="No reviews fetched. Check the app ID.")
+        raise HTTPException(
+            status_code=404,
+            detail=f"No reviews found for '{app_id}'. Check the app ID exists on Google Play and has English reviews."
+        )
     append_raw_items(items)
-    add_source({"type": "google_play", "id": req.app_id, "count": len(items)})
+    add_source({"type": "google_play", "id": app_id, "count": len(items)})
     save_to_disk()
     return {"status": "ok", "count": len(items), "source": "google_play", "total_raw": len(get_store()["raw_items"])}
 
 
 @app.post("/api/ingest/reddit")
-async def ingest_reddit(req: RedditRequest):
+def ingest_reddit(req: RedditRequest):
+    subreddit = _normalize_subreddit(req.subreddit)
+    if not subreddit:
+        raise HTTPException(status_code=400, detail="Enter a subreddit name, e.g. whatsapp.")
+    if not SUBREDDIT_RE.match(subreddit):
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{subreddit[:40]}' isn't a valid subreddit name. Use 2-21 letters, numbers or underscores."
+        )
     safe_count = max(10, min(req.count, MAX_REDDIT_COUNT))
-    items = fetch_reddit_posts(req.subreddit, query=req.query, count=safe_count)
+    items = fetch_reddit_posts(subreddit, query=req.query.strip(), count=safe_count)
     if not items:
-        raise HTTPException(status_code=400, detail="No posts fetched. Check the subreddit name.")
+        hint = " matching your search" if req.query.strip() else ""
+        raise HTTPException(
+            status_code=404,
+            detail=f"No posts{hint} found in r/{subreddit}. Check the subreddit exists and is public, or Reddit may be rate-limiting; try again in a minute."
+        )
     append_raw_items(items)
-    add_source({"type": "reddit", "id": f"r/{req.subreddit}", "count": len(items)})
+    add_source({"type": "reddit", "id": f"r/{subreddit}", "count": len(items)})
     save_to_disk()
     return {"status": "ok", "count": len(items), "source": "reddit", "total_raw": len(get_store()["raw_items"])}
 
@@ -589,18 +626,22 @@ async def ingest_gmail(req: GmailRequest, request: Request):
 
 @app.post("/api/ingest/csv")
 async def ingest_csv(file: UploadFile = File(...)):
+    filename = file.filename or "upload.csv"
+    if not filename.lower().endswith((".csv", ".txt")):
+        raise HTTPException(status_code=400, detail="Upload a .csv file.")
     content = await file.read()
-    items = parse_csv_feedback(content)
-    if not items:
-        raise HTTPException(status_code=400, detail="No feedback found in CSV. Needs a 'text' column.")
+    try:
+        items = parse_csv_feedback(content)
+    except CSVFormatError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     append_raw_items(items)
-    add_source({"type": "csv", "id": file.filename or "upload.csv", "count": len(items)})
+    add_source({"type": "csv", "id": filename, "count": len(items)})
     save_to_disk()
     return {"status": "ok", "count": len(items), "source": "csv", "total_raw": len(get_store()["raw_items"])}
 
 
 @app.post("/api/ingest/demo")
-async def ingest_demo():
+def ingest_demo():
     items = get_demo_items()
     clear_store()
     set_raw_items(items)
@@ -612,7 +653,7 @@ async def ingest_demo():
 # --- Analysis endpoint ---
 
 @app.post("/api/analyze")
-async def analyze(req: AnalyzeRequest = AnalyzeRequest()):
+def analyze(req: AnalyzeRequest = AnalyzeRequest()):
     store = get_store()
 
     if req.use_demo or not store["raw_items"]:
@@ -630,7 +671,13 @@ async def analyze(req: AnalyzeRequest = AnalyzeRequest()):
     analysis_input = raw_items[:MAX_ANALYZE_ITEMS]
 
     print(f"🔬 Running analysis on {len(analysis_input)} items...")
-    results = run_pipeline(analysis_input)
+    try:
+        results = run_pipeline(analysis_input)
+    except Exception as e:
+        # Raw items stay loaded and no partial results are stored, so the
+        # user can simply retry.
+        print(f"❌ Analysis failed: {e}")
+        raise HTTPException(status_code=500, detail="Analysis failed unexpectedly. Your data is still loaded; try again.")
     results["run_meta"] = {
         "analysis_id": f"run_{uuid.uuid4().hex[:10]}",
         "analyzed_at": datetime.now(timezone.utc).isoformat(),
@@ -662,7 +709,11 @@ async def dashboard(time_filter: str = "all"):
 # --- Ask Rivyu ---
 
 @app.post("/api/ask")
-async def ask(req: AskRequest):
+def ask(req: AskRequest):
+    if not req.question or not req.question.strip():
+        raise HTTPException(status_code=400, detail="Type a question first.")
+    if len(req.question) > 1000:
+        raise HTTPException(status_code=400, detail="Keep questions under 1,000 characters.")
     store = get_store()
     if not store["processed_items"]:
         if store["raw_items"]:
@@ -726,13 +777,16 @@ async def status():
         "theme_count": len(store["themes"]),
         "alert_count": len(store["alerts"]),
         "sources": store["sources_connected"],
-        "has_results": bool(store["stats"])
+        "has_results": session_state() == "analyzed",
+        "state": session_state(),
+        "analyzed_at": (store.get("run_meta") or {}).get("analyzed_at", ""),
+        "analyze_limit": MAX_ANALYZE_ITEMS,
     }, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "version": app.version}
 
 
 @app.post("/api/reset")
