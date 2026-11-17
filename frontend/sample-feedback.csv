@@ -1,0 +1,13 @@
+text,date,author,rating,source
+"Checkout keeps failing with 'payment declined' even though my card works everywhere else.",2026-11-02,Customer 1041,1,support_email
+"I was charged twice for my annual plan and nobody has replied to my ticket in 4 days.",2026-11-03,Customer 1187,1,support_email
+"App freezes on the order tracking screen after the latest update.",2026-11-04,Customer 1203,2,call_center
+"The new search is so much faster, great job!",2026-11-05,Customer 1210,5,survey
+"Can you add Apple Pay? Typing my card every time is annoying.",2026-11-06,Customer 1222,3,survey
+"Delivery estimate said 30 minutes, took almost two hours. No notification about the delay.",2026-11-07,Customer 1230,2,call_center
+"Login code never arrives by SMS. I had to reinstall to get in.",2026-11-08,Customer 1244,1,support_email
+"Promo code WELCOME20 says expired but the email said it's valid until December.",2026-11-09,Customer 1251,2,support_email
+"Love the dark mode, much easier on the eyes at night.",2026-11-10,Customer 1263,5,survey
+"App crashes every time I open my order history on Android 15.",2026-11-11,Customer 1270,1,call_center
+"Refund for a cancelled order still hasn't shown up after 10 days.",2026-11-12,Customer 1288,1,support_email
+"The checkout page is confusing, I couldn't find where to add a tip.",2026-11-13,Customer 1295,3,survey

@@ -24,7 +24,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-    <link rel="stylesheet" href="/static/style.css?v=20261117">
+    <link rel="stylesheet" href="/static/style.css?v=20261117b">
     <script>
         // Apply the saved theme before first paint to avoid a flash.
         try { const t = localStorage.getItem('rivyu-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
@@ -141,9 +141,9 @@
                     <div class="preview-body">
                         <div class="metrics">
                             <div class="card metric"><div class="metric-label">Feedback analyzed</div><div class="metric-value">30</div></div>
-                            <div class="card metric is-alert"><div class="metric-label">Priority alerts</div><div class="metric-value">6</div></div>
-                            <div class="card metric"><div class="metric-label">Themes</div><div class="metric-value">10</div></div>
-                            <div class="card metric"><div class="metric-label">Complaints</div><div class="metric-value">24</div></div>
+                            <div class="card metric is-alert"><div class="metric-label">Priority alerts</div><div class="metric-value">4</div></div>
+                            <div class="card metric"><div class="metric-label">Themes</div><div class="metric-value">9</div></div>
+                            <div class="card metric"><div class="metric-label">Complaints</div><div class="metric-value">21</div></div>
                         </div>
                         <div class="grid grid-2">
                             <div class="card alert-card" data-severity="critical">
@@ -197,6 +197,12 @@
                             </div>
                             <span class="field-error" id="gp-app-id-error" role="alert"></span>
                             <span class="field-hint" id="gp-hint">The ID is the part after <code>id=</code> in the app's Play Store link.</span>
+                            <div class="quick-picks" aria-label="Example apps">
+                                <span>Try:</span>
+                                <button type="button" class="chip chip-sm" data-action="fill" data-target="#gp-app-id" data-value="com.spotify.music">Spotify</button>
+                                <button type="button" class="chip chip-sm" data-action="fill" data-target="#gp-app-id" data-value="com.duolingo">Duolingo</button>
+                                <button type="button" class="chip chip-sm" data-action="fill" data-target="#gp-app-id" data-value="com.ubercab.eats">Uber Eats</button>
+                            </div>
                             <button class="btn btn-primary" type="submit">Fetch reviews</button>
                         </div>
                     </form>
@@ -216,6 +222,12 @@
                                 <input class="input" id="reddit-sub" name="subreddit" placeholder="whatsapp" autocomplete="off" spellcheck="false" aria-describedby="reddit-sub-error">
                             </div>
                             <span class="field-error" id="reddit-sub-error" role="alert"></span>
+                            <p class="setup-note" id="reddit-note" hidden>Reddit now requires API access. This server doesn't have Reddit API credentials configured yet, so try Google Play or a CSV instead.</p>
+                            <div class="quick-picks" aria-label="Example subreddits">
+                                <span>Try:</span>
+                                <button type="button" class="chip chip-sm" data-action="fill" data-target="#reddit-sub" data-value="spotify">r/spotify</button>
+                                <button type="button" class="chip chip-sm" data-action="fill" data-target="#reddit-sub" data-value="duolingo">r/duolingo</button>
+                            </div>
                             <div class="field-row">
                                 <div class="field">
                                     <label class="label" for="reddit-query">Search <span class="optional">(optional)</span></label>
@@ -249,7 +261,10 @@
                                 </label>
                                 <span class="field-error" id="csv-file-error" role="alert"></span>
                             </div>
-                            <button type="button" class="link-btn" aria-expanded="false" aria-controls="csv-help" id="csv-help-toggle">Expected format</button>
+                            <div class="link-row">
+                                <button type="button" class="link-btn" aria-expanded="false" aria-controls="csv-help" id="csv-help-toggle">Expected format</button>
+                                <a class="link-btn" href="/static/sample-feedback.csv" download="rivyu-sample-feedback.csv">Download a sample CSV</a>
+                            </div>
                             <div class="help-panel" id="csv-help" hidden>
                                 <span>Needs a <code>text</code> column (or <code>feedback</code>, <code>review</code>, <code>comment</code>, <code>content</code>, <code>body</code>, <code>message</code>).</span>
                                 <span>Optional: <code>date</code>, <code>author</code>, <code>rating</code>, <code>source</code>.</span>
@@ -358,6 +373,7 @@
                         <h1 id="ask-title">Ask Rivyu</h1>
                         <p id="ask-sub">Ask questions about the analyzed feedback. Answers are grounded in this session's data.</p>
                     </div>
+                    <div class="page-actions" id="ask-actions"></div>
                 </div>
                 <div id="ask-empty"></div>
                 <div class="card chat" id="chat" hidden>
@@ -383,7 +399,7 @@
 
     <footer class="footer">
         <div class="container">
-            <span>Rivyu is a portfolio project. Data lives in a shared demo session and is cleared when the server restarts, so please don't upload anything sensitive.</span>
+            <span>Rivyu is a portfolio project. Your data is private to your browser session and is deleted after 48 hours of inactivity or when the server restarts. Please don't upload anything sensitive.</span>
             <span><a href="https://github.com/dheera525/rivyu-product-feedback-clarity" rel="noopener">Source on GitHub</a></span>
         </div>
     </footer>
@@ -391,6 +407,6 @@
     <div class="toast-region" id="toasts" aria-live="polite" aria-relevant="additions"></div>
     <div id="modal-root"></div>
 
-    <script src="/static/app.js?v=20261117"></script>
+    <script src="/static/app.js?v=20261117b"></script>
 </body>
 </html>

@@ -13,11 +13,14 @@
 
 ## Features
 
-- **Sources**: Google Play reviews (by app ID or store URL), Reddit posts (by subreddit and optional search), CSV upload of support tickets or survey answers, and a built-in demo dataset. Gmail and X connectors are in progress and shown as *Coming soon*.
+- **Sources**: Google Play reviews (by app ID or store URL), Reddit posts (by subreddit and optional search, needs Reddit API credentials, see [Configuration](#configuration)), CSV upload of support tickets or survey answers ([sample file](frontend/sample-feedback.csv)), and a built-in demo dataset. Gmail and X connectors are in progress and shown as *Coming soon*.
 - **Analysis pipeline**: LLM classification into 16 product buckets with sentiment, urgency (1–5), risk tag and summary. It falls back to a keyword heuristic when no model is available, then groups items into themes and phrase-level sub-patterns, detects week-over-week trends, and scores alerts.
 - **Dashboard**: 24h / 7d / all-time views, complaint rate, source breakdown, severity-ranked alerts with suggested actions, theme cards with sentiment and trend sparklines, a searchable and filterable evidence feed, and CSV export of complaints.
 - **Ask Rivyu**: chat over the analyzed session ("What should we prioritize this sprint?"). Answers are grounded in the session's themes, alerts and the most urgent items.
-- **Reliable by design**: every LLM call has a fallback, so the app still works with no API keys at all.
+- **Understands emojis**: reviews like "👍", "🔥🔥🔥" or "😡" are scored for sentiment (skin tones and variants included), emoji-only reactions are summarized in words, and emojis like 🐛 or 🐌 count as "bug" or "slow".
+- **Private sessions**: each browser gets its own session (HttpOnly cookie), so visitors never see each other's data.
+- **Live progress**: analysis runs in the background and the UI shows each pipeline stage as it actually completes.
+- **Reliable by design**: every LLM call has a fallback, so the app still works with no API keys at all. The UI shows whether answers come from an AI model or the offline fallback.
 
 | Themes | Ask Rivyu |
 | --- | --- |
@@ -89,7 +92,7 @@ The suite covers classification fallbacks, theme grouping, trend detection, aler
 ```text
 backend/
   main.py              FastAPI app: ingestion, analysis, dashboard, ask, export
-  store.py             In-memory session store with atomic JSON persistence
+  store.py             Per-visitor session store with atomic JSON persistence
   demo_data.py         30-item demo dataset (dates shifted to stay recent)
   ingest/              Source connectors (playstore, reddit, csv_upload; gmail, x, youtube in progress)
   pipeline/
@@ -99,6 +102,7 @@ backend/
     trend.py           Weekly trend detection
     alerts.py          Risk scoring and alert generation
     ask_rivyu.py       Grounded Q&A with deterministic fallback
+    emoji_signals.py   Emoji sentiment and meaning
     run_pipeline.py    Orchestrates the steps above
 frontend/              Vanilla HTML/CSS/JS served by FastAPI (no build step)
 tests/                 pytest suite
@@ -114,8 +118,10 @@ Dockerfile, render.yaml
 | `POST` | `/api/ingest/reddit` | Add Reddit posts (`subreddit`, `query`, `count`) |
 | `POST` | `/api/ingest/csv` | Upload a CSV with a `text` column |
 | `POST` | `/api/ingest/demo` | Replace the session with the demo dataset |
-| `POST` | `/api/analyze` | Run the pipeline on the current session |
-| `GET` | `/api/status` | Session state: `empty`, `ingested` or `analyzed` |
+| `POST` | `/api/analyze/start` | Start the analysis in the background |
+| `GET` | `/api/analyze/progress` | Current stage and percent of the running analysis |
+| `POST` | `/api/analyze` | Run the analysis and wait for the result (for scripts) |
+| `GET` | `/api/status` | Session state (`empty`, `ingested`, `analyzed`) and server capabilities |
 | `GET` | `/api/dashboard?time_filter=all\|7d\|24h` | Dashboard payload |
 | `GET` | `/api/theme/{theme_id}` | Theme detail with all items |
 | `POST` | `/api/ask` | Ask a question about the analyzed data |
@@ -131,7 +137,12 @@ Full interactive docs are at `/docs`.
 | `GEMINI_API_KEY` | Primary LLM provider (optional) |
 | `OPENAI_API_KEY` | Fallback LLM provider (optional) |
 | `OPENAI_MODEL` | Preferred OpenAI model (optional) |
+| `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` | Reddit API app credentials. Required for Reddit: Reddit blocks unauthenticated requests. Create a free "script" app at [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps). |
+| `CORS_ORIGINS` | Comma-separated origins allowed to call the API from other sites (off by default) |
+| `ENABLE_EXPERIMENTAL_SOURCES` | `true` enables the unfinished Gmail, X and YouTube endpoints (off by default) |
 | `PORT` | Server port (default `8000`) |
+
+`GET /api/health` reports which LLM mode is active (`gemini`, `openai` or `fallback`) and whether Reddit API access is configured, without exposing any secrets.
 
 Set secrets in your host's environment settings (on Render: **Environment**). Never commit `.env`.
 
@@ -141,8 +152,9 @@ Set secrets in your host's environment settings (on Render: **Environment**). Ne
 
 ## Known limitations
 
-- **One shared session.** All visitors share the same in-memory dataset, which suits a single-user demo. Multi-user use would need per-session or per-workspace storage.
+- **Sessions are per browser, not per account.** There are no user accounts; clearing cookies starts a new session. Sessions are deleted after 48 hours of inactivity.
 - **Ephemeral storage.** On Render's free tier, data is cleared when the instance restarts or redeploys.
+- **Single process.** Background analysis jobs and sessions live in one server process, which fits the free tier; scaling out would need a shared store and job queue.
 - **Analysis size.** A run analyzes up to 220 items to keep latency reasonable.
 
 ## License

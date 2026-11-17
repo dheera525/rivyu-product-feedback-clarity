@@ -118,6 +118,11 @@ def generate_alerts(themes):
         if core_bucket == "Positive Feedback / Praise" and negative_ratio < 0.2 and high_urgency_count == 0:
             continue
 
+        # Suppress noise: uncategorized feedback that isn't mostly negative,
+        # and single reports outside the critical buckets.
+        if core_bucket == "Other" and negative_ratio < 0.5:
+            continue
+
         # Priority logic using risk score + critical triggers
         critical_buckets = {
             "Crashes & App Stability", "Payments, Refunds & Billing",
@@ -142,6 +147,9 @@ def generate_alerts(themes):
             alert_type = "watch"
             severity = "low"
 
+        if alert_type and count < 2 and core_bucket not in critical_buckets:
+            alert_type = severity = None
+
         if alert_type and severity:
             theme_id = theme.get("theme_id", "unknown")
             items = theme.get("items", [])
@@ -160,6 +168,11 @@ def generate_alerts(themes):
                 "high_urgency_count": high_urgency_count,
                 "sources": list({item.get("source", "unknown") for item in items}),
                 "suggested_action": build_action(theme, alert_type),
+                "label": theme.get("label", core_bucket),
+                "risk_label": RISK_LABELS.get(risk_tag, ""),
+                "avg_urgency": theme.get("avg_urgency", 0),
+                "source_count": signals["source_count"],
+                "quotes": top_quotes(theme),
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
             alerts.append(alert)
@@ -201,31 +214,65 @@ def build_title(theme, alert_type):
     elif alert_type == "feature_demand":
         return f"Growing demand: {label}"
     elif alert_type == "recurring":
-        return f"{label} — recurring {(risk_label or 'issue').lower()}"
+        return f"{label} — recurring {(risk_label or 'issue').lower().replace('ux ', 'UX ')}"
     elif alert_type == "watch":
         return f"Watch: {label}"
     else:
         return f"Alert: {label}"
 
 
-def build_description(theme, alert_type):
-    label = theme.get("label", "Unknown")
-    count = theme.get("count", 0)
-    trend = theme.get("trend", "stable")
-    avg_urgency = theme.get("avg_urgency", 0)
-    core_bucket = theme.get("core_bucket", "Other")
-    risk_tag = theme.get("risk_tag", "none")
-    top_entities = theme.get("top_entities", [])
+SOURCE_NAMES = {
+    "google_play": "Google Play",
+    "reddit": "Reddit",
+    "csv": "CSV",
+    "gmail": "Gmail",
+    "x": "X",
+    "youtube_comments": "YouTube",
+}
 
+RISK_LABELS = {
+    "revenue_risk": "revenue risk",
+    "churn_risk": "churn risk",
+    "stability_risk": "stability risk",
+    "trust_risk": "trust risk",
+    "ux_risk": "UX risk",
+    "support_risk": "support risk",
+    "retention_risk": "retention risk",
+}
+
+
+def _join(names):
+    names = list(names)
+    if len(names) <= 1:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def build_description(theme, alert_type):
+    """One or two plain-language sentences summarizing the evidence."""
+    count = int(theme.get("count", 0) or 0)
+    items = theme.get("items", []) or []
     signals = compute_signals(theme)
-    desc = (
-        f"{count} report{'' if count == 1 else 's'} in \"{core_bucket}\" bucket. "
-        f"Trend: {trend}, avg urgency {avg_urgency:.1f}/5, "
-        f"{signals['high_urgency_count']} high-urgency, "
-        f"{int(signals['negative_ratio'] * 100)}% negative."
-    )
-    if top_entities:
-        desc += f" Key mentions: {', '.join(top_entities[:4])}."
+    sources = sorted({SOURCE_NAMES.get(i.get("source"), str(i.get("source") or "unknown")) for i in items})
+    neg_pct = int(round(signals["negative_ratio"] * 100))
+    high = signals["high_urgency_count"]
+
+    who = f"{count} piece{'' if count == 1 else 's'} of feedback"
+    desc = f"{who} from {_join(sources)}." if sources else f"{who}."
+    tone = "All negative" if neg_pct == 100 else "None negative" if neg_pct == 0 else f"{neg_pct}% negative"
+    desc += f" {tone}"
+    desc += f", {high} marked high urgency." if high else "."
+
+    trend = theme.get("trend", "stable")
+    pct = theme.get("trend_pct", 0) or 0
+    if trend in {"rising", "spiking"} and pct > 0:
+        desc += f" Up {pct:g}% vs. earlier weeks."
+    elif trend == "new":
+        desc += " Appeared only in the latest week."
+
+    mentions = [m for m in (theme.get("top_entities") or [])[:3] if m]
+    if mentions:
+        desc += f" Common words: {', '.join(mentions)}."
     return desc
 
 
@@ -233,30 +280,46 @@ def build_action(theme, alert_type):
     risk_tag = theme.get("risk_tag", "none")
 
     risk_actions = {
-        "revenue_risk": "Review payment/billing flows and escalate to finance team.",
-        "stability_risk": "Investigate crash logs and prioritize hotfix in current sprint.",
-        "trust_risk": "Audit affected processes and prepare customer communication.",
-        "churn_risk": "Identify blocking issues and fast-track resolution.",
-        "support_risk": "Review support queue and consider scaling capacity.",
-        "ux_risk": "Conduct UX review of affected flows with design team.",
-        "retention_risk": "Evaluate feature demand and consider roadmap inclusion.",
+        "revenue_risk": "Audit the payment and billing flow, refund affected customers, and loop in finance.",
+        "stability_risk": "Pull crash logs for the affected versions and ship a hotfix.",
+        "trust_risk": "Audit the affected process and prepare a customer communication.",
+        "churn_risk": "Find what's blocking users and fast-track the fix.",
+        "support_risk": "Review the support queue and add capacity or macros.",
+        "ux_risk": "Run a UX review of the affected flow with design.",
+        "retention_risk": "Validate demand and decide whether it belongs on the roadmap.",
     }
 
     if alert_type == "critical":
-        base = "Investigate immediately and prioritize fix in current sprint."
-        if risk_tag in risk_actions:
-            base += f" {risk_actions[risk_tag]}"
-        return base
-    elif alert_type == "rising":
-        return risk_actions.get(risk_tag, "Monitor closely and assign owner for root cause analysis.")
-    elif alert_type == "feature_demand":
-        return "Consider adding to roadmap or validating demand with PM team."
-    elif alert_type == "recurring":
-        return risk_actions.get(risk_tag, "Review repeated complaints and evaluate long-term fix.")
-    elif alert_type == "watch":
-        return "Track this issue for 24–48h and assign an owner if volume rises."
-    else:
-        return "Monitor this theme."
+        return "Treat as a release blocker this sprint. " + risk_actions.get(
+            risk_tag, "Assign an owner and investigate the root cause today.")
+    if alert_type == "rising":
+        return risk_actions.get(risk_tag, "Assign an owner and find the root cause before it grows.")
+    if alert_type == "feature_demand":
+        return "Validate demand with users and size it for the roadmap."
+    if alert_type == "recurring":
+        return risk_actions.get(risk_tag, "Review the repeated complaints and plan a long-term fix.")
+    if alert_type == "watch":
+        return "Track for 24–48 hours and assign an owner if volume rises."
+    return "Monitor this theme."
+
+
+def top_quotes(theme, limit=2, max_len=180):
+    """The most urgent, most negative customer quotes for a theme."""
+    items = sorted(
+        theme.get("items", []) or [],
+        key=lambda i: (-int(_safe_num(i.get("urgency", 3), 3)), _safe_num(i.get("sentiment", 0), 0)),
+    )
+    quotes = []
+    for item in items:
+        text = " ".join(str(item.get("text") or "").split())
+        if len(text) < 12:
+            continue
+        if len(text) > max_len:
+            text = text[: max_len - 1].rstrip() + "…"
+        quotes.append({"text": text, "source": item.get("source", ""), "date": item.get("date", "")})
+        if len(quotes) >= limit:
+            break
+    return quotes
 
 
 if __name__ == "__main__":

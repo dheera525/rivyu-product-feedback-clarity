@@ -12,7 +12,7 @@ const state = {
     dashboard: null,       // last /api/dashboard payload
     timeFilter: 'all',
     themeScope: 'all',
-    feed: { q: '', source: '', bucket: '', tone: '' },
+    feed: { q: '', source: '', bucket: '', tone: '', limit: 40 },
     chatStarted: false,
     asking: false,
     analyzing: false,
@@ -355,7 +355,11 @@ function route() {
     if (name === 'sources') renderRail();
     if (name === 'dashboard') loadDashboard();
     if (name === 'theme') loadTheme(param);
-    if (name === 'ask') renderAsk();
+    if (name === 'ask') {
+        renderAsk();
+        if (!firstRoute) refreshStatus().then(renderAsk).catch(() => {});
+    }
+    if (name === 'sources' && !firstRoute) refreshStatus().catch(() => {});
 
     if (!firstRoute) {
         window.scrollTo(0, 0);
@@ -516,6 +520,14 @@ function renderRail() {
         ? `Analysis uses the first ${limit} items to keep it fast.`
         : 'Adding a source clears previous results until you re-run the analysis.';
 
+    // Reddit needs API credentials on the server; say so instead of failing later.
+    const caps = (s && s.capabilities) || {};
+    const redditForm = $('#form-reddit');
+    const redditReady = !s || caps.reddit_api;
+    redditForm.classList.toggle('needs-setup', !redditReady);
+    $$('input, button[type="submit"]', redditForm).forEach(el => { el.disabled = !redditReady; });
+    $('#reddit-note').hidden = redditReady;
+
     // Card badges reflect what's actually connected.
     $$('form.source-card').forEach(form => {
         const connected = sources.some(src => src.type === form.dataset.source);
@@ -525,6 +537,9 @@ function renderRail() {
         if (form.dataset.source === 'demo') {
             badge.textContent = connected ? 'Loaded' : 'Sample';
             badge.className = `badge ${connected ? 'badge-live' : 'badge-accent'}`;
+        } else if (form.classList.contains('needs-setup')) {
+            badge.textContent = 'Setup needed';
+            badge.className = 'badge badge-soon';
         } else {
             badge.textContent = connected ? 'Connected' : 'Live';
             badge.className = `badge ${connected ? 'badge-live' : 'badge-outline'}`;
@@ -563,15 +578,34 @@ const STEPS = [
     ['Generating alerts', 'Ranking risks and suggesting actions'],
 ];
 
-async function runAnalysis({ useDemo = false, after = '#/dashboard' } = {}) {
-    if (state.analyzing) return;
-    state.analyzing = true;
-    renderSessionPill();
-    renderRail();
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+let analysisModal = null;
+
+async function pollJob() {
+    // Poll until the background job finishes. Network hiccups are retried.
+    let failures = 0;
+    for (;;) {
+        await sleep(600);
+        let job;
+        try {
+            job = await api('/api/analyze/progress', { timeout: 20000 });
+            failures = 0;
+        } catch (err) {
+            if (++failures >= 5) throw err;
+            continue;
+        }
+        if (job.status === 'idle') throw new ApiError('The analysis was interrupted (the server may have restarted). Please run it again.');
+        if (analysisModal) analysisModal.update(job);
+        if (job.status === 'done') return job.result;
+        if (job.status === 'error') throw new ApiError(job.error || 'Analysis failed.');
+    }
+}
+
+function openAnalysisModal() {
     const dialog = openModal(`
         <h2 id="analysis-title">Analyzing feedback</h2>
-        <p id="analysis-sub">This usually takes 10–40 seconds.</p>
+        <p id="analysis-sub">Usually 5–40 seconds, depending on how many items there are.</p>
         <div class="progress" role="progressbar" aria-label="Analysis progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress-fill" id="analysis-fill"></div></div>
         <ol class="stepper" id="analysis-steps">
             ${STEPS.map(([t, d], i) => `
@@ -587,56 +621,76 @@ async function runAnalysis({ useDemo = false, after = '#/dashboard' } = {}) {
     const bar = $('.progress', dialog);
     let current = 0;
 
-    const setStep = idx => {
+    const setStep = (idx, percent) => {
+        current = Math.min(idx, STEPS.length - 1);
         items.forEach((li, i) => {
             li.dataset.state = i < idx ? 'done' : i === idx ? 'active' : 'pending';
             li.querySelector('.dot').innerHTML = i < idx ? icon('check') : '';
         });
-        const pct = Math.round((idx / STEPS.length) * 100);
-        fill.style.width = `${Math.max(6, pct)}%`;
-        bar.setAttribute('aria-valuenow', String(pct));
+        const pct = Math.max(4, Math.min(100, percent));
+        fill.style.width = `${pct}%`;
+        bar.setAttribute('aria-valuenow', String(Math.round(pct)));
     };
-    setStep(0);
+    setStep(0, 0);
 
-    // The backend runs all stages in one request, so we pace the stepper
-    // and hold on the last stage until the response arrives.
-    const ticker = setInterval(() => {
-        if (current < STEPS.length - 1) setStep(++current);
-    }, 2200);
+    analysisModal = {
+        update(job) {
+            if (job.status === 'done') return setStep(STEPS.length, 100);
+            setStep(job.stage_index || 0, job.percent || 0);
+        },
+        done(res) {
+            setStep(STEPS.length, 100);
+            $('#analysis-sub', dialog).textContent = `Done: ${plural(res.analyzed_count, 'item')}, ${plural(res.theme_count, 'theme')}, ${plural(res.alert_count, 'alert')}.`;
+        },
+        fail(message, onRetry) {
+            items[current].dataset.state = 'error';
+            items[current].querySelector('.dot').innerHTML = icon('x');
+            $('#analysis-title', dialog).textContent = 'Analysis failed';
+            $('#analysis-sub', dialog).textContent = message;
+            const actions = $('#analysis-actions', dialog);
+            actions.hidden = false;
+            actions.innerHTML = `
+                <button class="btn" type="button" data-choice="close">Close</button>
+                <button class="btn btn-primary" type="button" data-choice="retry">Try again</button>`;
+            actions.querySelector('[data-choice="retry"]').focus();
+            actions.addEventListener('click', e => {
+                const choice = e.target.closest('[data-choice]');
+                if (!choice) return;
+                closeModal();
+                analysisModal = null;
+                if (choice.dataset.choice === 'retry') onRetry();
+            }, { once: true });
+        },
+    };
+    return analysisModal;
+}
+
+async function runAnalysis({ useDemo = false, after = '#/dashboard', resume = false } = {}) {
+    if (state.analyzing) return;
+    state.analyzing = true;
+    renderSessionPill();
+    renderRail();
+    const modal = openAnalysisModal();
 
     try {
-        if (useDemo) await api('/api/ingest/demo', { method: 'POST' });
-        const res = await api('/api/analyze', { method: 'POST', body: { use_demo: false }, timeout: 180000 });
-        clearInterval(ticker);
-        setStep(STEPS.length);
-        fill.style.width = '100%';
-        $('#analysis-sub', dialog).textContent = `Done: ${plural(res.analyzed_count, 'item')}, ${plural(res.theme_count, 'theme')}, ${plural(res.alert_count, 'alert')}.`;
+        if (!resume) {
+            if (useDemo) await api('/api/ingest/demo', { method: 'POST' });
+            const job = await api('/api/analyze/start', { method: 'POST', body: { use_demo: false } });
+            modal.update(job);
+        }
+        const res = await pollJob();
+        modal.done(res);
         state.dashboard = null;
         state.analyzing = false;
         await refreshStatus().catch(() => {});
-        await new Promise(r => setTimeout(r, 650));
+        await sleep(650);
         closeModal();
+        analysisModal = null;
         toast('success', 'Analysis complete', `${plural(res.alert_count, 'priority alert')} across ${plural(res.theme_count, 'theme')}.`);
         go(after);
     } catch (err) {
-        clearInterval(ticker);
         state.analyzing = false;
-        items[current].dataset.state = 'error';
-        items[current].querySelector('.dot').innerHTML = icon('x');
-        $('#analysis-title', dialog).textContent = 'Analysis failed';
-        $('#analysis-sub', dialog).textContent = err.message;
-        const actions = $('#analysis-actions', dialog);
-        actions.hidden = false;
-        actions.innerHTML = `
-            <button class="btn" type="button" data-choice="close">Close</button>
-            <button class="btn btn-primary" type="button" data-choice="retry">Try again</button>`;
-        actions.querySelector('[data-choice="retry"]').focus();
-        actions.addEventListener('click', e => {
-            const choice = e.target.closest('[data-choice]');
-            if (!choice) return;
-            closeModal();
-            if (choice.dataset.choice === 'retry') runAnalysis({ useDemo, after });
-        }, { once: true });
+        modal.fail(err.message, () => runAnalysis({ useDemo, after }));
         await refreshStatus().catch(() => {});
     } finally {
         renderSessionPill();
@@ -700,13 +754,14 @@ async function loadDashboard() {
     const meta = $('#run-meta');
     $('#dash-actions').hidden = true;
 
-    if (!state.status) {
-        body.innerHTML = dashboardSkeleton();
-        try { await refreshStatus(); } catch (err) {
-            body.innerHTML = emptyState({ iconName: 'alert', title: 'Couldn\'t load the dashboard', body: err.message,
-                actions: `<button class="btn" type="button" data-action="reload-dashboard">${icon('refresh')} Try again</button>` });
-            return;
-        }
+    // Always re-check: data may have changed in another tab.
+    if (!state.status) body.innerHTML = dashboardSkeleton();
+    try {
+        await refreshStatus();
+    } catch (err) {
+        body.innerHTML = emptyState({ iconName: 'alert', title: 'Couldn\'t load the dashboard', body: err.message,
+            actions: `<button class="btn" type="button" data-action="reload-dashboard">${icon('refresh')} Try again</button>` });
+        return;
     }
 
     if (sessionState() !== 'analyzed') {
@@ -764,7 +819,7 @@ function sentimentMeter(value) {
 
 function sparkline(timeBuckets, label) {
     const values = Object.keys(timeBuckets || {}).sort().map(k => timeBuckets[k]);
-    if (!values.length) return '';
+    if (values.length < 2) return '<span class="spark-empty">Not enough history for a trend</span>';
     const w = 96, h = 28, pad = 3;
     const pts = values.length === 1 ? [values[0], values[0]] : values;
     const max = Math.max(...pts, 1);
@@ -807,7 +862,8 @@ function renderDashboard() {
     $('#run-meta').innerHTML = `
         <span>${icon('clock')} Analyzed ${esc(timeAgo(run.analyzed_at) || 'recently')}</span>
         <span>${icon('database')} ${plural(stats.total_items || 0, 'item')}</span>
-        <span>${icon('layers')} ${plural(sources.length, 'source')}${isDemo ? ' · demo data' : ''}</span>`;
+        <span>${icon('layers')} ${plural(sources.length, 'source')}${isDemo ? ' · demo data' : ''}</span>
+        <span>${icon('sparkles')} ${run.llm && run.llm !== 'fallback' ? 'AI classification' : 'Rule-based classification (no AI key)'}</span>`;
 
     const filterLabel = { all: 'all time', '7d': 'the last 7 days', '24h': 'the last 24 hours' }[state.timeFilter];
     const topAlert = alerts[0];
@@ -846,14 +902,7 @@ function renderDashboard() {
         </div>
 
         <div class="brief">
-            <div class="card brief-main">
-                <p class="eyebrow">Top priority</p>
-                ${topAlert ? `
-                    <h2>${esc(topAlert.title)}</h2>
-                    <p>${esc(topAlert.suggested_action || topAlert.description)}</p>
-                    <div class="brief-tags">${severityBadge(topAlert.severity)}${riskBadge(topAlert.risk_tag)}<span class="badge">${plural(topAlert.evidence_count || 0, 'report')}</span></div>
-                ` : `<h2>No urgent risks detected</h2><p>None of the themes crossed the alert threshold in this run.</p>`}
-            </div>
+            ${executiveSummary(d)}
             <div class="card card-pad">
                 <h2 class="section-title" style="font-size:var(--text-md)">Feedback by source</h2>
                 ${barChart(breakdown, { colorVar: 'multi' })}
@@ -865,14 +914,7 @@ function renderDashboard() {
                 <h2 id="alerts-h" class="section-title">Priority alerts <span class="count">${alerts.length}</span></h2>
                 <p>Ranked by severity, then risk score. Based on all-time data.</p>
             </div>
-            ${alerts.length ? `<div class="grid grid-2">${alerts.map(a => `
-                <a class="card card-interactive alert-card" data-severity="${esc(a.severity)}" ${a.theme_id ? `href="#/theme/${encodeURIComponent(a.theme_id)}"` : ''}>
-                    <div class="alert-top">${severityBadge(a.severity)}${riskBadge(a.risk_tag)}<span class="score">Risk score ${a.risk_score || 0}</span></div>
-                    <h3>${esc(a.title)}</h3>
-                    <p>${esc(a.description)}</p>
-                    <div class="alert-action"><strong>Suggested action:</strong> ${esc(a.suggested_action)}</div>
-                    ${a.theme_id ? `<span class="card-link">View ${plural(a.evidence_count || 0, 'report')} ${icon('arrow-right')}</span>` : ''}
-                </a>`).join('')}</div>`
+            ${alerts.length ? `<div class="grid grid-2">${alerts.map(alertCard).join('')}</div>`
             : emptyState({ iconName: 'check', title: 'No alerts', body: 'No theme crossed the alert threshold. That\'s good news.', small: true })}
         </section>
 
@@ -938,7 +980,7 @@ function renderThemes() {
         <a class="card card-interactive theme-card" href="#/theme/${encodeURIComponent(t.theme_id)}">
             <div class="theme-top">
                 <h3>${esc(t.label)}</h3>
-                <div class="theme-count">${Number(t.count || 0).toLocaleString()}<small>mentions</small></div>
+                <div class="theme-count">${Number(t.count || 0).toLocaleString()}<small>${t.count === 1 ? 'mention' : 'mentions'}</small></div>
             </div>
             <div class="theme-tags">
                 ${t.parent_theme_id ? '<span class="badge badge-outline">Sub-pattern</span>' : ''}
@@ -989,6 +1031,7 @@ function feedItem(item, q = '') {
     return `
         <li class="feed-item">
             <p class="feed-text">${highlight(item.text || item.summary || '', q)}</p>
+            ${String(item.summary || '').startsWith('Emoji reaction') ? `<p class="emoji-meaning">${esc(item.summary)}</p>` : ''}
             <div class="feed-meta">
                 <span class="badge badge-outline">${esc(item.core_bucket || 'Other')}</span>
                 ${toneBadge}
@@ -1015,10 +1058,13 @@ function renderFeed() {
         feed.innerHTML = emptyState({ iconName: 'file', title: 'No feedback in this range', body: 'Try a wider time range.', small: true });
         return;
     }
+    const shown = Math.min(rows.length, state.feed.limit);
     feed.innerHTML = rows.length
-        ? `<ul class="feed">${rows.slice(0, 60).map(i => feedItem(i, needle)).join('')}</ul>`
+        ? `<ul class="feed">${rows.slice(0, shown).map(i => feedItem(i, needle)).join('')}</ul>`
         : `<div class="card-pad">${emptyState({ iconName: 'search', title: 'No matches', body: 'No feedback matches these filters.', actions: '<button class="btn btn-sm" type="button" data-action="reset-feed">Reset filters</button>', small: true })}</div>`;
-    feed.insertAdjacentHTML('beforeend', `<div class="feed-footer"><span>Showing ${Math.min(rows.length, 60)} of ${plural(all.length, 'item')}</span><span>Newest first</span></div>`);
+    const more = rows.length - shown;
+    feed.insertAdjacentHTML('beforeend', `<div class="feed-footer"><span>Showing ${shown} of ${plural(rows.length, 'matching item')}</span>${
+        more > 0 ? `<button class="btn btn-sm" type="button" data-action="feed-more">Show ${Math.min(more, 40)} more</button>` : '<span>Newest first</span>'}</div>`);
 }
 
 async function exportComplaints(btn) {
@@ -1084,6 +1130,13 @@ function renderTheme(t) {
             <div class="page-actions"><a class="btn btn-primary" href="#/ask">${icon('chat')} Ask about this</a></div>
         </div>
 
+        ${t.alert ? `
+        <div class="card next-step" data-severity="${esc(t.alert.severity)}">
+            <div class="alert-top">${severityBadge(t.alert.severity)}${riskBadge(t.alert.risk_tag)}<span class="score">Risk score ${t.alert.risk_score || 0}</span></div>
+            <p><strong>Recommended next step:</strong> ${esc(t.alert.suggested_action)}</p>
+            <p class="next-step-why">${esc(t.alert.description)}</p>
+        </div>` : ''}
+
         <div class="metrics">
             <div class="card metric"><div class="metric-label">Mentions</div><div class="metric-value">${t.count || items.length}</div></div>
             <div class="card metric"><div class="metric-label">Avg sentiment</div><div class="metric-value" style="color:var(--${toneOf(t.avg_sentiment) === 'mixed' ? 'text' : toneOf(t.avg_sentiment)})">${fmtSentiment(t.avg_sentiment)}</div><div class="metric-sub">Scale −1 to +1</div></div>
@@ -1104,6 +1157,8 @@ function renderTheme(t) {
             </div>
         </div>
 
+        ${quoteSection(items)}
+
         <section class="section" aria-labelledby="theme-items-h">
             <div class="section-head">
                 <h2 id="theme-items-h" class="section-title">Feedback <span class="count">${items.length}</span></h2>
@@ -1111,6 +1166,92 @@ function renderTheme(t) {
             </div>
             <div class="card"><ul class="feed">${items.map(i => feedItem(i)).join('')}</ul></div>
         </section>`;
+}
+
+function alertCard(a) {
+    const neg = Math.round((Number(a.negative_ratio) || 0) * 100);
+    const quote = (a.quotes || [])[0];
+    const urgency = Number(a.avg_urgency || 0);
+    return `
+        <a class="card card-interactive alert-card" data-severity="${esc(a.severity)}" ${a.theme_id ? `href="#/theme/${encodeURIComponent(a.theme_id)}"` : ''}>
+            <div class="alert-top">${severityBadge(a.severity)}${riskBadge(a.risk_tag)}<span class="score" title="Combines urgency, sentiment, volume, trend and risk type">Risk score ${a.risk_score || 0}</span></div>
+            <h3>${esc(a.label || a.title)}</h3>
+            <dl class="alert-stats">
+                <div><dt>Reports</dt><dd>${Number(a.evidence_count || 0).toLocaleString()}</dd></div>
+                <div><dt>Negative</dt><dd>${neg}%</dd></div>
+                <div><dt>Urgency</dt><dd>${urgency ? urgency.toFixed(1) : '–'}<small>/5</small></dd></div>
+                <div><dt>Sources</dt><dd>${a.source_count || (a.sources || []).length || 0}</dd></div>
+            </dl>
+            ${quote ? `<blockquote class="quote">“${esc(quote.text)}”<cite>${esc(sourceLabel(quote.source))}${shortDate(quote.date) ? ` · ${esc(shortDate(quote.date))}` : ''}</cite></blockquote>` : ''}
+            <div class="alert-action"><strong>Next step:</strong> ${esc(a.suggested_action)}</div>
+            ${a.theme_id ? `<span class="card-link">See all ${plural(a.evidence_count || 0, 'report')} ${icon('arrow-right')}</span>` : ''}
+        </a>`;
+}
+
+function executiveSummary(d) {
+    const stats = d.stats || {};
+    const alerts = d.alerts || [];
+    const primary = (d.themes || []).filter(t => !t.parent_theme_id);
+    const mentions = stats.filtered_items ?? stats.total_items ?? 0;
+    const complaints = stats.complaint_count || 0;
+    const pct = mentions ? Math.round((complaints / mentions) * 100) : 0;
+    const top = alerts[0];
+    // Ignore one-off "new" themes and uncategorized feedback: that's noise, not a trend.
+    const rising = primary.filter(t => ['rising', 'spiking', 'new'].includes(t.trend)
+        && (t.count || 0) >= 2 && t.core_bucket !== 'Other' && toneOf(t.avg_sentiment) !== 'positive');
+    const praise = (d.recent_items || [])
+        .filter(i => Number(i.sentiment) >= 0.5 && String(i.text || '').length > 15)
+        .sort((a, b) => b.sentiment - a.sentiment)[0];
+    const critical = alerts.filter(a => a.severity === 'critical');
+
+    const headline = top
+        ? `${top.label || top.title} needs attention first`
+        : 'No urgent risks in this data';
+    const points = [];
+    points.push(`<li>${icon('chart')}<span><strong>${pct}%</strong> of ${plural(mentions, 'piece')} of feedback ${pct === 1 ? 'is a complaint' : 'are complaints'} (negative or urgent).</span></li>`);
+    if (top) {
+        points.push(`<li>${icon('alert')}<span><strong>${esc(top.label || top.title)}</strong>: ${plural(top.evidence_count || 0, 'report')}, ${Math.round((top.negative_ratio || 0) * 100)}% negative. ${esc(top.suggested_action || '')}</span></li>`);
+    }
+    if (critical.length > 1) {
+        points.push(`<li>${icon('alert')}<span>${critical.length} critical alerts in total: ${critical.slice(1).map(a => esc(a.label || a.title)).join(', ')} also ${critical.length === 2 ? 'needs' : 'need'} a fix this sprint.</span></li>`);
+    }
+    points.push(rising.length
+        ? `<li>${icon('chart')}<span>Rising: ${rising.slice(0, 3).map(t => `<strong>${esc(t.label)}</strong>`).join(', ')}.</span></li>`
+        : `<li>${icon('check')}<span>No complaint theme is rising sharply week over week.</span></li>`);
+    if (praise) {
+        const text = praise.text.length > 110 ? praise.text.slice(0, 109) + '…' : praise.text;
+        points.push(`<li>${icon('sparkles')}<span>What's working: “${esc(text)}”</span></li>`);
+    }
+    return `
+        <div class="card brief-main">
+            <p class="eyebrow">Summary</p>
+            <h2>${esc(headline)}</h2>
+            <ul class="summary-points">${points.join('')}</ul>
+        </div>`;
+}
+
+function quoteSection(items) {
+    const quotes = [...items]
+        .filter(i => (i.text || '').length > 15)
+        .sort((a, b) => (b.urgency || 0) - (a.urgency || 0) || (a.sentiment || 0) - (b.sentiment || 0))
+        .slice(0, 3);
+    if (!quotes.length) return '';
+    return `
+        <section class="section" aria-labelledby="quotes-h">
+            <div class="section-head"><h2 id="quotes-h" class="section-title">What customers say</h2><p>The most urgent reports.</p></div>
+            <div class="grid grid-3">${quotes.map(q => `
+                <figure class="card card-pad quote-card">
+                    <blockquote class="quote">“${esc(q.text.length > 220 ? q.text.slice(0, 219) + '…' : q.text)}”</blockquote>
+                    <figcaption>${urgencyMeter(q.urgency)} ${esc(sourceLabel(q.source))}${shortDate(q.date) ? ` · ${esc(shortDate(q.date))}` : ''}</figcaption>
+                </figure>`).join('')}</div>
+        </section>`;
+}
+
+function newChat() {
+    $('#chat-log').innerHTML = '';
+    $('#suggestions').hidden = false;
+    state.chatStarted = false;
+    renderAsk();
 }
 
 // -------------------------------------------------------------
@@ -1137,6 +1278,13 @@ function renderAsk() {
 
     empty.innerHTML = '';
     chat.hidden = false;
+    const caps = (state.status && state.status.capabilities) || {};
+    const ai = caps.llm && caps.llm !== 'fallback';
+    $('#ask-actions').innerHTML = `
+        <span class="badge ${ai ? 'badge-live' : 'badge-outline'}" title="${ai ? 'Answers are written by an AI model using this session\'s data.' : 'No AI key is configured on the server, so answers are built from the analysis results with rules.'}">
+            ${icon('sparkles')} ${ai ? `AI answers (${esc(caps.llm === 'gemini' ? 'Gemini' : 'OpenAI')})` : 'Offline mode'}
+        </span>
+        <button class="btn btn-sm" type="button" data-action="new-chat">${icon('refresh')} New chat</button>`;
     if (!state.chatStarted) {
         state.chatStarted = true;
         const s = state.status;
@@ -1226,6 +1374,7 @@ async function ask(question) {
     const q = question.trim();
     if (!q || state.asking) return;
     addMessage('user', q);
+    $('#suggestions').hidden = true;
     const input = $('#ask-input');
     input.value = '';
     autosize(input);
@@ -1298,8 +1447,14 @@ function wireEvents() {
         else if (action === 'export') exportComplaints(el);
         else if (action === 'reload-dashboard') { state.dashboard = null; loadDashboard(); }
         else if (action === 'reload-theme') route();
+        else if (action === 'feed-more') { state.feed.limit += 40; renderFeed(); }
+        else if (action === 'new-chat') newChat();
+        else if (action === 'fill') {
+            const target = document.querySelector(el.dataset.target);
+            if (target) { target.value = el.dataset.value; setFieldError(target, ''); target.focus(); }
+        }
         else if (action === 'reset-feed') {
-            state.feed = { q: '', source: '', bucket: '', tone: '' };
+            state.feed = { q: '', source: '', bucket: '', tone: '', limit: 40 };
             $('#feed-q').value = '';
             populateFeedFilters();
             renderFeed();
@@ -1349,12 +1504,12 @@ function wireEvents() {
     $('#dash-body').addEventListener('input', e => {
         if (e.target.id === 'feed-q') {
             clearTimeout(searchTimer);
-            searchTimer = setTimeout(() => { state.feed.q = e.target.value; renderFeed(); }, 120);
+            searchTimer = setTimeout(() => { state.feed.q = e.target.value; state.feed.limit = 40; renderFeed(); }, 120);
         }
     });
     $('#dash-body').addEventListener('change', e => {
         const key = e.target.dataset.feed;
-        if (key) { state.feed[key] = e.target.value; renderFeed(); }
+        if (key) { state.feed[key] = e.target.value; state.feed.limit = 40; renderFeed(); }
     });
 
     // Ask
@@ -1402,6 +1557,10 @@ async function boot() {
             showWake(true);
             await new Promise(r => setTimeout(r, Math.min(2000 + attempt * 1000, 6000)));
         }
+    }
+
+    if (state.status && state.status.analyzing) {
+        runAnalysis({ resume: true, after: location.hash || '#/dashboard' });
     }
 
     // Re-render whichever page is open now that we know the real state.
