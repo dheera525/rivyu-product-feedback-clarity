@@ -2,374 +2,395 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rivyu — AI Product Feedback Intelligence</title>
-    <link rel="stylesheet" href="/static/style.css?v=20260408-v8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Rivyu · AI product feedback analysis</title>
+    <meta name="description" content="Rivyu turns app reviews, Reddit posts and support logs into prioritized themes, risk alerts and grounded answers.">
+    <meta name="theme-color" content="#4f46e5">
+
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Rivyu">
+    <meta property="og:title" content="Rivyu · AI product feedback analysis">
+    <meta property="og:description" content="Turn messy customer feedback into prioritized themes, risk alerts and answers you can act on.">
+    <meta property="og:url" content="https://rivyu.onrender.com/">
+    <meta property="og:image" content="https://rivyu.onrender.com/static/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Rivyu · AI product feedback analysis">
+    <meta name="twitter:description" content="Turn messy customer feedback into prioritized themes, risk alerts and answers you can act on.">
+    <meta name="twitter:image" content="https://rivyu.onrender.com/static/og-image.png">
+
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+    <link rel="stylesheet" href="/static/style.css?v=20261117">
+    <script>
+        // Apply the saved theme before first paint to avoid a flash.
+        try { const t = localStorage.getItem('rivyu-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+    </script>
 </head>
 <body>
-    <div id="app">
-        <!-- NAV -->
-        <nav class="navbar" id="main-nav">
-            <div class="nav-brand" onclick="showPage('landing')" style="cursor:pointer">
-                <span class="logo">R</span>
-                <span class="brand-name">Rivyu</span>
-                <span class="brand-tag">AI feedback intelligence</span>
-            </div>
-            <div class="nav-links">
-                <button class="nav-btn" data-page="landing">Home</button>
-                <button class="nav-btn" data-page="sources">Sources</button>
-                <button class="nav-btn" data-page="dashboard">Dashboard</button>
-                <button class="nav-btn" data-page="ask">Ask Rivyu</button>
-            </div>
-        </nav>
+    <!-- Icon sprite -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+        <symbol id="i-logo" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="var(--accent)" stroke="none"/><path d="M9 11.5h14M9 16h9M9 20.5h11" stroke="var(--on-accent)" stroke-width="2.4" fill="none"/></symbol>
+        <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+        <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></symbol>
+        <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+        <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+        <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+        <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></symbol>
+        <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+        <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+        <symbol id="i-phone" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></symbol>
+        <symbol id="i-chat" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></symbol>
+        <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8M16 17H8M10 9H8"/></symbol>
+        <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9Z"/><path d="M19 15v4M17 17h4"/></symbol>
+        <symbol id="i-mail" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></symbol>
+        <symbol id="i-at" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/></symbol>
+        <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
+        <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+        <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4M12 17h.01"/></symbol>
+        <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+        <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></symbol>
+        <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+        <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></symbol>
+        <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/></symbol>
+        <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/></symbol>
+        <symbol id="i-plug" viewBox="0 0 24 24"><path d="M12 22v-5M9 8V2M15 8V2M18 8v5a6 6 0 0 1-12 0V8Z"/></symbol>
+        <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></symbol>
+        <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+        <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+    </svg>
 
-        <!-- PAGE: LANDING -->
-        <div id="page-landing" class="page active">
-            <div class="landing-hero">
-                <div class="landing-hero-glow"></div>
-                <div class="landing-hero-content">
-                    <div class="landing-badge">AI-Powered Feedback Analysis</div>
-                    <h1 class="landing-headline">Turn messy customer feedback into<br><span class="landing-highlight">product signals, risks &amp; actions</span></h1>
-                    <p class="landing-subline">Connect feedback sources, run AI analysis, and discover what your users actually need — in minutes, not weeks.</p>
-                    <div class="landing-cta-row">
-                        <button onclick="showPage('sources')" class="btn btn-large btn-accent landing-cta-primary">
-                            <span>Start Analysis</span>
-                            <span class="cta-arrow">→</span>
-                        </button>
-                        <button onclick="quickDemo()" class="btn btn-large btn-primary landing-cta-secondary">Try Demo</button>
-                    </div>
-                </div>
-            </div>
+    <a class="skip-link" href="#main">Skip to content</a>
 
-            <div class="landing-steps">
-                <div class="landing-step">
-                    <div class="landing-step-icon">
-                        <span class="step-num">01</span>
-                    </div>
-                    <h3>Connect Sources</h3>
-                    <p>Connect Play Store, Reddit, Gmail buckets, or CSV. X integration is coming soon.</p>
-                </div>
-                <div class="landing-step">
-                    <div class="landing-step-icon">
-                        <span class="step-num">02</span>
-                    </div>
-                    <h3>AI Analysis</h3>
-                    <p>Classify into intelligent buckets with sentiment, urgency, and risk scoring.</p>
-                </div>
-                <div class="landing-step">
-                    <div class="landing-step-icon">
-                        <span class="step-num">03</span>
-                    </div>
-                    <h3>Discover Insights</h3>
-                    <p>Get priority alerts, theme clusters, and actionable recommendations.</p>
-                </div>
-            </div>
-
-            <div class="landing-preview">
-                <div class="preview-card">
-                    <div class="preview-header">
-                        <span class="preview-dot red"></span>
-                        <span class="preview-dot yellow"></span>
-                        <span class="preview-dot green"></span>
-                        <span class="preview-title">Dashboard Preview</span>
-                    </div>
-                    <div class="preview-body">
-                        <div class="preview-alert">
-                            <span class="preview-severity critical">CRITICAL</span>
-                            <span>Crashes & App Stability — stability concern</span>
-                        </div>
-                        <div class="preview-alert">
-                            <span class="preview-severity high">HIGH</span>
-                            <span>Login & Account Access — churn risk rising</span>
-                        </div>
-                        <div class="preview-stats-row">
-                            <div class="preview-stat">
-                                <div class="preview-stat-val">247</div>
-                                <div class="preview-stat-label">Reviews Analyzed</div>
-                            </div>
-                            <div class="preview-stat">
-                                <div class="preview-stat-val">5</div>
-                                <div class="preview-stat-label">Priority Alerts</div>
-                            </div>
-                            <div class="preview-stat">
-                                <div class="preview-stat-val">12</div>
-                                <div class="preview-stat-label">Theme Clusters</div>
-                            </div>
-                        </div>
-                        <div class="preview-buckets">
-                            <span class="preview-bucket">App Bugs</span>
-                            <span class="preview-bucket">Billing</span>
-                            <span class="preview-bucket">UX Friction</span>
-                            <span class="preview-bucket">Feature Requests</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="landing-footer">
-                <p>Built for product teams who want signal, not noise.</p>
+    <header class="nav">
+        <div class="container nav-inner">
+            <a class="brand" href="#/" aria-label="Rivyu home">
+                <svg class="brand-mark"><use href="#i-logo"/></svg>
+                <span class="brand-text">Rivyu</span>
+            </a>
+            <nav class="nav-links" aria-label="Main">
+                <a class="nav-link" href="#/" data-route="landing">Home</a>
+                <a class="nav-link" href="#/sources" data-route="sources">Sources</a>
+                <a class="nav-link" href="#/dashboard" data-route="dashboard">Dashboard</a>
+                <a class="nav-link" href="#/ask" data-route="ask">Ask Rivyu</a>
+            </nav>
+            <div class="nav-end">
+                <span class="session-pill" id="session-pill" role="status" title="Session status">
+                    <span class="status-dot" id="session-dot"></span>
+                    <span class="label-text" id="session-label">Connecting…</span>
+                </span>
+                <button class="icon-btn" id="theme-toggle" type="button" aria-label="Color theme: system">
+                    <svg class="i"><use href="#i-monitor"/></svg>
+                </button>
             </div>
         </div>
+    </header>
 
-        <!-- PAGE: SOURCES -->
-        <div id="page-sources" class="page">
-            <div class="hero-panel">
-                <div class="page-header page-header-hero">
-                    <div class="header-title-group">
-                        <h1>Signal Ingestion</h1>
-                        <p>Connect live inputs, then run a single high-clarity analysis pass for this session.</p>
-                    </div>
-                    <div class="page-header-note">Session-scoped output only.</div>
-                </div>
-                <div class="hero-meta-row">
-                    <div class="trust-strip">
-                        <span class="trust-pill">Session-isolated</span>
-                        <span class="trust-pill">Source-linked evidence</span>
-                        <span class="trust-pill">Hybrid AI bucketing</span>
-                    </div>
-                    <div class="hero-status">
-                        <span class="hero-status-dot"></span>
-                        <span id="hero-session-status">Awaiting source connections</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="source-experience">
-                <div class="source-grid">
-                    <!-- Google Play -->
-                    <div class="source-card">
-                        <div class="source-icon">📱</div>
-                        <h3>Google Play Reviews</h3>
-                        <p>Pull recent reviews by app ID</p>
-                        <div class="source-form">
-                            <input type="text" id="gp-app-id" placeholder="e.g. com.whatsapp" />
-                            <input type="number" id="gp-count" value="80" min="10" max="300" />
-                            <button onclick="ingestPlayStore()" class="btn btn-primary">Fetch Reviews</button>
-                        </div>
-                        <div id="gp-status" class="source-status"></div>
-                    </div>
-
-                    <!-- Reddit -->
-                    <div class="source-card">
-                        <div class="source-icon">🔍</div>
-                        <h3>Reddit Posts</h3>
-                        <p>Pull recent posts from a subreddit</p>
-                        <div class="source-form">
-                            <input type="text" id="reddit-sub" placeholder="e.g. whatsapp" />
-                            <input type="text" id="reddit-query" placeholder="Search query (optional)" />
-                            <input type="number" id="reddit-count" value="80" min="10" max="300" />
-                            <button onclick="ingestReddit()" class="btn btn-primary">Fetch Posts</button>
-                        </div>
-                        <div id="reddit-status" class="source-status"></div>
-                    </div>
-
-                    <!-- Gmail -->
-                    <div class="source-card">
-                        <div class="source-icon">✉️</div>
-                        <h3>Gmail Inbox</h3>
-                        <p>Forward client complaints to intake aliases and analyze bucket-wise.</p>
-                        <div class="source-form">
-                            <input type="email" id="gmail-email" placeholder="Intake inbox (e.g. rivyuinbox@gmail.com)" oninput="updateGmailAliasPreview()" />
-                            <input type="password" id="gmail-password" placeholder="Gmail app password" />
-                            <input type="text" id="gmail-bucket" placeholder="Company bucket (e.g. acme)" oninput="updateGmailAliasPreview()" />
-                            <div id="gmail-alias-preview" class="system-state-text">Forwarding alias preview: add intake email + bucket.</div>
-                            <input type="text" id="gmail-folder" placeholder="Folder/label (default: INBOX)" />
-                            <input type="text" id="gmail-query" placeholder="Extra filter (optional, e.g. refund OR crash)" />
-                            <input type="number" id="gmail-count" value="80" min="10" max="300" />
-                            <button id="gmail-fetch-btn" onclick="ingestGmail()" class="btn btn-primary">Fetch Bucket Emails</button>
-                        </div>
-                        <div id="gmail-status" class="source-status"></div>
-                    </div>
-
-                    <!-- CSV -->
-                    <div class="source-card">
-                        <div class="source-icon">📄</div>
-                        <div class="source-title-row">
-                            <h3>CSV Complaints</h3>
-                            <button type="button" class="info-btn" onclick="toggleCsvFormatInfo()" aria-label="CSV format help">i</button>
-                        </div>
-                        <p>Upload exported customer call/email complaint logs.</p>
-                        <div id="csv-format-info" class="csv-format-info hidden">
-                            <strong>Expected CSV format</strong>
-                            <p>Required: <code>text</code> (or <code>feedback/review/comment/content</code>)</p>
-                            <p>Optional: <code>date</code>, <code>author</code>, <code>rating</code>, <code>source</code></p>
-                            <p>Example row: <code>"Payment failed on checkout","2026-04-08","Customer 102",1,"call_center"</code></p>
-                        </div>
-                        <div class="source-form">
-                            <input type="file" id="csv-file" accept=".csv" />
-                            <button onclick="ingestCSV()" class="btn btn-primary">Upload CSV</button>
-                        </div>
-                        <div id="csv-status" class="source-status"></div>
-                    </div>
-
-                    <!-- X Coming Soon -->
-                    <div class="source-card source-card-coming">
-                        <div class="source-icon">𝕏</div>
-                        <h3>X Integration</h3>
-                        <p>Coming soon. We’ll auto-scan brand mentions once API access is finalized.</p>
-                        <div class="source-form">
-                            <button class="btn btn-small" disabled>Coming Soon</button>
-                        </div>
-                    </div>
-
-                    <!-- Demo -->
-                    <div class="source-card source-card-demo">
-                        <div class="source-icon">🎯</div>
-                        <h3>Demo Dataset</h3>
-                        <p>Load sample feedback for a quick walkthrough.</p>
-                        <div class="source-form">
-                            <button onclick="loadDemo()" class="btn btn-accent">Load Demo Data</button>
-                        </div>
-                        <div id="demo-status" class="source-status"></div>
-                    </div>
-                </div>
-
-                <aside class="source-rail">
-                    <div class="rail-steps">
-                        <h3>Execution Flow</h3>
-                        <div class="rail-step"><span>01</span> Connect source streams</div>
-                        <div class="rail-step"><span>02</span> Run unified analysis</div>
-                        <div class="rail-step"><span>03</span> Review risk + evidence</div>
-                    </div>
-
-                    <!-- Connected sources summary -->
-                    <div id="sources-summary" class="sources-summary hidden">
-                        <div class="sources-summary-head">
-                            <h3>Connected Inputs</h3>
-                            <button onclick="resetSession()" class="btn btn-small">Clear Sources</button>
-                        </div>
-                        <div id="system-state-text" class="system-state-text">Awaiting source inputs.</div>
-                        <div id="sources-list"></div>
-                        <div class="summary-total">Total items: <span id="total-count">0</span></div>
-                    </div>
-
-                    <!-- Run Analysis -->
-                    <div class="analyze-section">
-                        <button id="analyze-btn" onclick="runAnalysis()" class="btn btn-large btn-accent" disabled>
-                            Analyze Current Session
-                        </button>
-                        <p class="session-note">Data is stored locally for this demo and replaced on each new source load.</p>
-                    </div>
-                </aside>
-            </div>
-        </div>
-
-        <!-- PAGE: LOADING -->
-        <div id="page-loading" class="page">
-            <div class="loading-container">
-                <div class="loading-spinner"></div>
-                <h2 id="loading-title">Analyzing current session...</h2>
-                <div class="loading-progress">
-                    <div id="loading-progress-fill" class="loading-progress-fill"></div>
-                </div>
-                <div id="loading-stage-caption" class="loading-stage-caption">Preparing analysis context...</div>
-                <div class="loading-steps">
-                    <div class="step" id="step-ingest"><span class="step-icon">⏳</span> Normalizing source data</div>
-                    <div class="step" id="step-classify"><span class="step-icon">⏳</span> AI bucket classification</div>
-                    <div class="step" id="step-themes"><span class="step-icon">⏳</span> Grouping into themes</div>
-                    <div class="step" id="step-trends"><span class="step-icon">⏳</span> Computing trend windows</div>
-                    <div class="step" id="step-alerts"><span class="step-icon">⏳</span> Generating risk alerts</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- PAGE: DASHBOARD -->
-        <div id="page-dashboard" class="page">
-            <div class="page-header page-header-hero">
-                <div class="header-title-group">
-                    <h1>Dashboard</h1>
-                    <p>Decision-grade intelligence from the current session, tied to real source evidence.</p>
-                </div>
-                <div class="dash-actions">
-                    <div class="time-filters">
-                        <button class="btn btn-small time-btn active" data-filter="all" onclick="setTimeFilter('all')">All Time</button>
-                        <button class="btn btn-small time-btn" data-filter="7d" onclick="setTimeFilter('7d')">Last 7 Days</button>
-                        <button class="btn btn-small time-btn" data-filter="24h" onclick="setTimeFilter('24h')">Last 24h</button>
-                    </div>
-                    <button onclick="refreshDashboard()" class="btn btn-small">Refresh</button>
-                    <button onclick="downloadComplaintsCSV()" class="btn btn-small">Export CSV</button>
-                    <button onclick="showPage('ask')" class="btn btn-small btn-accent">Ask Rivyu</button>
-                </div>
-            </div>
-
-            <div id="dashboard-hero" class="dashboard-hero"></div>
-
-            <!-- Stats bar -->
-            <div id="stats-bar" class="stats-bar"></div>
-
-            <div class="insight-stage">
-                <!-- Alerts -->
-                <div id="alerts-section" class="section">
-                    <div class="section-head">
-                        <h2>Priority Alerts</h2>
-                        <p class="section-note">Highest-risk signals to review first.</p>
-                    </div>
-                    <div id="alerts-grid" class="alerts-grid"></div>
-                </div>
-
-                <!-- Themes -->
-                <div id="themes-section" class="section">
-                    <div class="section-head">
-                        <h2>Core Themes</h2>
-                        <div class="section-head-right">
-                            <div class="theme-scope-filters">
-                                <button class="btn btn-small theme-scope-btn active" data-theme-scope="all" onclick="setThemeScope('all')">All</button>
-                                <button class="btn btn-small theme-scope-btn" data-theme-scope="primary" onclick="setThemeScope('primary')">Buckets</button>
-                                <button class="btn btn-small theme-scope-btn" data-theme-scope="pattern" onclick="setThemeScope('pattern')">Sub-patterns</button>
-                            </div>
-                            <p class="section-note">Grouped by intelligent AI buckets.</p>
-                        </div>
-                    </div>
-                    <div id="themes-grid" class="themes-grid"></div>
-                </div>
-            </div>
-
-            <!-- Recent evidence -->
-            <div id="evidence-section" class="section">
-                <div class="section-head">
-                    <h2>Evidence Feed</h2>
-                    <p class="section-note">Recent comments with source context.</p>
-                </div>
-                <div id="evidence-list" class="evidence-list"></div>
-            </div>
-        </div>
-
-        <!-- PAGE: THEME DETAIL -->
-        <div id="page-theme" class="page">
-            <button onclick="showPage('dashboard')" class="btn btn-small back-btn">&larr; Back to Dashboard</button>
-            <div id="theme-detail-content"></div>
-        </div>
-
-        <!-- PAGE: ASK RIVYU -->
-        <div id="page-ask" class="page">
-            <div class="page-header page-header-hero">
-                <div class="header-title-group">
-                    <h1>Ask Rivyu</h1>
-                    <p>Query the current run and get grounded answers backed by session evidence.</p>
-                </div>
-                <div class="page-header-note">Answers are scoped to this session.</div>
-            </div>
-            <div class="ask-suggestions">
-                <button class="ask-chip" onclick="askPreset(this)">What are the top issues?</button>
-                <button class="ask-chip" onclick="askPreset(this)">What should we prioritize this sprint?</button>
-                <button class="ask-chip" onclick="askPreset(this)">Are there any revenue risks?</button>
-                <button class="ask-chip" onclick="askPreset(this)">What are users praising?</button>
-            </div>
-            <div class="chat-container">
-                <div id="chat-messages" class="chat-messages">
-                    <div class="chat-msg bot">
-                        <strong>Rivyu</strong>
-                        <div class="msg-content"><p>Your session is analyzed. Ask about priorities, risks, or emerging patterns.</p></div>
-                    </div>
-                </div>
-                <div class="chat-input-row">
-                    <input type="text" id="ask-input" placeholder="Ask about your feedback data..." onkeydown="if(event.key==='Enter')askQuestion()" />
-                    <button onclick="askQuestion()" class="btn btn-accent">Send</button>
-                </div>
-            </div>
+    <div class="wake-banner" id="wake-banner" role="status" hidden>
+        <div class="container">
+            <span class="spinner" aria-hidden="true"></span>
+            <span>Waking up the server. On the free hosting tier this can take up to a minute.</span>
         </div>
     </div>
 
-    <script src="/static/app.js?v=20260408-v8"></script>
+    <main id="main" tabindex="-1">
+        <!-- ============================== LANDING ============================== -->
+        <section class="page container" id="page-landing" data-page="landing" aria-labelledby="landing-title">
+            <div class="hero">
+                <span class="badge badge-accent hero-badge">AI feedback analysis</span>
+                <h1 id="landing-title">Turn messy customer feedback into <span class="accent">clear product priorities</span></h1>
+                <p class="hero-sub">Rivyu pulls in app reviews, Reddit posts and support logs, groups them into themes, flags the risks that matter, and answers questions about it in plain English.</p>
+                <div class="hero-cta">
+                    <button class="btn btn-primary btn-lg" type="button" data-action="try-demo">
+                        Try the demo
+                        <svg class="i"><use href="#i-arrow-right"/></svg>
+                    </button>
+                    <a class="btn btn-lg" href="#/sources">Connect your own data</a>
+                </div>
+                <p class="hero-note">The demo loads 30 sample reviews and runs the full analysis. No sign-up.</p>
+            </div>
+
+            <h2 class="visually-hidden">How it works</h2>
+            <div class="steps">
+                <div class="card step-card">
+                    <div class="step-icon"><svg class="i"><use href="#i-plug"/></svg></div>
+                    <h3><span class="num">01</span>Connect sources</h3>
+                    <p>Pull Google Play reviews or Reddit posts, upload a CSV of support tickets, or start with the demo dataset.</p>
+                </div>
+                <div class="card step-card">
+                    <div class="step-icon"><svg class="i"><use href="#i-sparkles"/></svg></div>
+                    <h3><span class="num">02</span>Analyze with AI</h3>
+                    <p>Each item is classified by topic, sentiment, urgency and business risk, then grouped into themes with trends.</p>
+                </div>
+                <div class="card step-card">
+                    <div class="step-icon"><svg class="i"><use href="#i-chart"/></svg></div>
+                    <h3><span class="num">03</span>Act on insights</h3>
+                    <p>Review priority alerts with suggested actions, dig into the evidence, and ask follow-up questions.</p>
+                </div>
+            </div>
+
+            <div class="preview">
+                <div class="card preview-frame" aria-label="Example dashboard preview">
+                    <div class="preview-chrome" aria-hidden="true">
+                        <i></i><i></i><i></i>
+                        <span class="badge badge-outline">Example preview</span>
+                    </div>
+                    <div class="preview-body">
+                        <div class="metrics">
+                            <div class="card metric"><div class="metric-label">Feedback analyzed</div><div class="metric-value">30</div></div>
+                            <div class="card metric is-alert"><div class="metric-label">Priority alerts</div><div class="metric-value">6</div></div>
+                            <div class="card metric"><div class="metric-label">Themes</div><div class="metric-value">10</div></div>
+                            <div class="card metric"><div class="metric-label">Complaints</div><div class="metric-value">24</div></div>
+                        </div>
+                        <div class="grid grid-2">
+                            <div class="card alert-card" data-severity="critical">
+                                <div class="alert-top"><span class="badge sev sev-critical">Critical</span><span class="badge">Stability risk</span></div>
+                                <h3>Crashes &amp; App Stability: stability concern</h3>
+                                <p>10 reports of crashes on launch since the 3.2.1 update, across Play Store, Reddit and support.</p>
+                            </div>
+                            <div class="card alert-card" data-severity="high">
+                                <div class="alert-top"><span class="badge sev sev-high">High</span><span class="badge">Revenue risk</span></div>
+                                <h3>Payments, Refunds &amp; Billing: revenue at risk</h3>
+                                <p>Customers report double charges on subscriptions and slow refund responses.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <p class="preview-caption">Illustrative numbers from the demo dataset. Run the demo to see a live analysis.</p>
+            </div>
+        </section>
+
+        <!-- ============================== SOURCES ============================== -->
+        <section class="page container" id="page-sources" data-page="sources" aria-labelledby="sources-title" hidden>
+            <div class="page-header">
+                <div>
+                    <p class="eyebrow">Step 1</p>
+                    <h1 id="sources-title">Connect feedback sources</h1>
+                    <p>Add one or more sources, then run the analysis. Everything you add is combined into one session.</p>
+                </div>
+            </div>
+
+            <div class="sources-layout">
+                <div class="grid grid-2">
+                    <!-- Google Play -->
+                    <form class="card source-card" id="form-playstore" data-source="google_play" novalidate>
+                        <div class="source-head">
+                            <div class="source-icon"><svg class="i"><use href="#i-phone"/></svg></div>
+                            <div class="source-title">
+                                <h3>Google Play reviews <span class="badge badge-live" data-badge>Live</span></h3>
+                                <p>Fetch the newest reviews for any Android app.</p>
+                            </div>
+                        </div>
+                        <div class="source-form">
+                            <div class="field-row">
+                                <div class="field">
+                                    <label class="label" for="gp-app-id">App ID or Play Store URL</label>
+                                    <input class="input" id="gp-app-id" name="app_id" placeholder="com.whatsapp" autocomplete="off" spellcheck="false" aria-describedby="gp-app-id-error gp-hint">
+                                </div>
+                                <div class="field">
+                                    <label class="label" for="gp-count">Reviews</label>
+                                    <input class="input" id="gp-count" name="count" type="number" value="80" min="10" max="300" inputmode="numeric">
+                                </div>
+                            </div>
+                            <span class="field-error" id="gp-app-id-error" role="alert"></span>
+                            <span class="field-hint" id="gp-hint">The ID is the part after <code>id=</code> in the app's Play Store link.</span>
+                            <button class="btn btn-primary" type="submit">Fetch reviews</button>
+                        </div>
+                    </form>
+
+                    <!-- Reddit -->
+                    <form class="card source-card" id="form-reddit" data-source="reddit" novalidate>
+                        <div class="source-head">
+                            <div class="source-icon"><svg class="i"><use href="#i-chat"/></svg></div>
+                            <div class="source-title">
+                                <h3>Reddit posts <span class="badge badge-live" data-badge>Live</span></h3>
+                                <p>Pull recent posts from a public subreddit.</p>
+                            </div>
+                        </div>
+                        <div class="source-form">
+                            <div class="field">
+                                <label class="label" for="reddit-sub">Subreddit</label>
+                                <input class="input" id="reddit-sub" name="subreddit" placeholder="whatsapp" autocomplete="off" spellcheck="false" aria-describedby="reddit-sub-error">
+                            </div>
+                            <span class="field-error" id="reddit-sub-error" role="alert"></span>
+                            <div class="field-row">
+                                <div class="field">
+                                    <label class="label" for="reddit-query">Search <span class="optional">(optional)</span></label>
+                                    <input class="input" id="reddit-query" name="query" placeholder="crash OR bug" autocomplete="off">
+                                </div>
+                                <div class="field">
+                                    <label class="label" for="reddit-count">Posts</label>
+                                    <input class="input" id="reddit-count" name="count" type="number" value="80" min="10" max="300" inputmode="numeric">
+                                </div>
+                            </div>
+                            <button class="btn btn-primary" type="submit">Fetch posts</button>
+                        </div>
+                    </form>
+
+                    <!-- CSV -->
+                    <form class="card source-card" id="form-csv" data-source="csv" novalidate>
+                        <div class="source-head">
+                            <div class="source-icon"><svg class="i"><use href="#i-file"/></svg></div>
+                            <div class="source-title">
+                                <h3>CSV complaints <span class="badge badge-live" data-badge>Live</span></h3>
+                                <p>Upload exported support tickets, call notes or survey answers.</p>
+                            </div>
+                        </div>
+                        <div class="source-form">
+                            <div class="field">
+                                <span class="label" id="csv-label">CSV file (max 5 MB)</span>
+                                <label class="file-drop" id="csv-drop">
+                                    <svg class="i"><use href="#i-upload"/></svg>
+                                    <span class="file-name" id="csv-file-name">Choose a file or drop it here</span>
+                                    <input type="file" id="csv-file" accept=".csv,text/csv" aria-labelledby="csv-label" aria-describedby="csv-file-error">
+                                </label>
+                                <span class="field-error" id="csv-file-error" role="alert"></span>
+                            </div>
+                            <button type="button" class="link-btn" aria-expanded="false" aria-controls="csv-help" id="csv-help-toggle">Expected format</button>
+                            <div class="help-panel" id="csv-help" hidden>
+                                <span>Needs a <code>text</code> column (or <code>feedback</code>, <code>review</code>, <code>comment</code>, <code>content</code>, <code>body</code>, <code>message</code>).</span>
+                                <span>Optional: <code>date</code>, <code>author</code>, <code>rating</code>, <code>source</code>.</span>
+                                <span>Example: <code>"Payment failed at checkout",2026-04-08,Customer 102,1</code></span>
+                            </div>
+                            <button class="btn btn-primary" type="submit">Upload CSV</button>
+                        </div>
+                    </form>
+
+                    <!-- Demo -->
+                    <form class="card source-card" id="form-demo" data-source="demo" novalidate>
+                        <div class="source-head">
+                            <div class="source-icon"><svg class="i"><use href="#i-sparkles"/></svg></div>
+                            <div class="source-title">
+                                <h3>Demo dataset <span class="badge badge-accent" data-badge>Sample</span></h3>
+                                <p>30 realistic reviews about crashes, login, billing and feature requests. Replaces the current session.</p>
+                            </div>
+                        </div>
+                        <div class="source-form">
+                            <button class="btn" type="submit">Load demo data</button>
+                        </div>
+                    </form>
+
+                    <!-- Gmail (coming soon) -->
+                    <div class="card source-card is-coming" aria-disabled="true">
+                        <div class="source-head">
+                            <div class="source-icon"><svg class="i"><use href="#i-mail"/></svg></div>
+                            <div class="source-title">
+                                <h3>Gmail inbox <span class="badge badge-soon">Coming soon</span></h3>
+                                <p>Analyze customer emails forwarded to a shared inbox.</p>
+                            </div>
+                        </div>
+                        <div class="source-form"><button class="btn" type="button" disabled>Coming soon</button></div>
+                    </div>
+
+                    <!-- X (coming soon) -->
+                    <div class="card source-card is-coming" aria-disabled="true">
+                        <div class="source-head">
+                            <div class="source-icon"><svg class="i"><use href="#i-at"/></svg></div>
+                            <div class="source-title">
+                                <h3>X mentions <span class="badge badge-soon">Coming soon</span></h3>
+                                <p>Track brand mentions and replies on X.</p>
+                            </div>
+                        </div>
+                        <div class="source-form"><button class="btn" type="button" disabled>Coming soon</button></div>
+                    </div>
+                </div>
+
+                <aside class="rail" aria-labelledby="session-title">
+                    <div class="card rail-card">
+                        <p class="eyebrow">Step 2</p>
+                        <h2 id="session-title">Current session</h2>
+                        <p class="rail-state" id="rail-state">No data loaded yet.</p>
+                        <ul class="source-list" id="source-list" hidden></ul>
+                        <div class="rail-total" id="rail-total" hidden><span>Total items</span><span id="rail-total-num">0</span></div>
+                        <div class="rail-actions">
+                            <button class="btn btn-primary btn-lg btn-block" type="button" id="analyze-btn" data-action="analyze" disabled>
+                                <svg class="i"><use href="#i-sparkles"/></svg>
+                                <span id="analyze-label">Run analysis</span>
+                            </button>
+                            <a class="btn btn-block" href="#/dashboard" id="view-dash-btn" hidden>
+                                View dashboard
+                                <svg class="i"><use href="#i-arrow-right"/></svg>
+                            </a>
+                            <button class="btn btn-ghost btn-block" type="button" id="clear-btn" data-action="clear" hidden>
+                                <svg class="i"><use href="#i-trash"/></svg>
+                                Clear session
+                            </button>
+                        </div>
+                        <p class="rail-note" id="rail-note"></p>
+                    </div>
+                </aside>
+            </div>
+        </section>
+
+        <!-- ============================== DASHBOARD ============================== -->
+        <section class="page container" id="page-dashboard" data-page="dashboard" aria-labelledby="dash-title" hidden>
+            <div class="page-header">
+                <div>
+                    <h1 id="dash-title">Dashboard</h1>
+                    <div class="run-meta" id="run-meta"></div>
+                </div>
+                <div class="page-actions" id="dash-actions" hidden>
+                    <button class="btn" type="button" data-action="export">
+                        <svg class="i"><use href="#i-download"/></svg> Export complaints
+                    </button>
+                    <a class="btn btn-primary" href="#/ask">
+                        <svg class="i"><use href="#i-chat"/></svg> Ask Rivyu
+                    </a>
+                </div>
+            </div>
+            <div id="dash-body" aria-live="polite" aria-busy="false"></div>
+        </section>
+
+        <!-- ============================== THEME DETAIL ============================== -->
+        <section class="page container" id="page-theme" data-page="theme" aria-labelledby="theme-title" hidden>
+            <a class="back-link" href="#/dashboard"><svg class="i"><use href="#i-arrow-left"/></svg>Back to dashboard</a>
+            <div id="theme-body" aria-live="polite"></div>
+        </section>
+
+        <!-- ============================== ASK ============================== -->
+        <section class="page container" id="page-ask" data-page="ask" aria-labelledby="ask-title" hidden>
+            <div class="ask-layout">
+                <div class="page-header">
+                    <div>
+                        <h1 id="ask-title">Ask Rivyu</h1>
+                        <p id="ask-sub">Ask questions about the analyzed feedback. Answers are grounded in this session's data.</p>
+                    </div>
+                </div>
+                <div id="ask-empty"></div>
+                <div class="card chat" id="chat" hidden>
+                    <div class="chat-log" id="chat-log" role="log" aria-live="polite" aria-label="Conversation"></div>
+                    <div class="suggestions" id="suggestions" aria-label="Suggested questions">
+                        <button class="chip" type="button">What are the top issues?</button>
+                        <button class="chip" type="button">What should we prioritize this sprint?</button>
+                        <button class="chip" type="button">Are there any revenue risks?</button>
+                        <button class="chip" type="button">What's new in the last week?</button>
+                    </div>
+                    <form class="composer" id="ask-form">
+                        <label class="visually-hidden" for="ask-input">Your question</label>
+                        <textarea id="ask-input" rows="1" maxlength="1000" placeholder="Ask about priorities, risks or trends…"></textarea>
+                        <button class="btn btn-primary" type="submit" id="ask-send" aria-label="Send question">
+                            <svg class="i"><use href="#i-send"/></svg>
+                        </button>
+                    </form>
+                    <div class="composer-hint">Enter to send · Shift+Enter for a new line</div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <span>Rivyu is a portfolio project. Data lives in a shared demo session and is cleared when the server restarts, so please don't upload anything sensitive.</span>
+            <span><a href="https://github.com/dheera525/rivyu-product-feedback-clarity" rel="noopener">Source on GitHub</a></span>
+        </div>
+    </footer>
+
+    <div class="toast-region" id="toasts" aria-live="polite" aria-relevant="additions"></div>
+    <div id="modal-root"></div>
+
+    <script src="/static/app.js?v=20261117"></script>
 </body>
 </html>
